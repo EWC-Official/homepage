@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EWC 世界地震情報</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body, html { height: 100%; margin: 0; overflow: hidden; }
+        #map { height: 100vh; width: 100vw; z-index: 1; background-color: #060606; }
+        #sidebar { transition: transform 0.3s ease-in-out; z-index: 2000; }
+        .sidebar-open { transform: translateX(0); }
+        .sidebar-closed { transform: translateX(-100%); }
+        .mag-badge { padding: 2px 8px; border-radius: 12px; font-weight: bold; color: white; font-size: 0.7rem; }
+        .mag-small { background-color: #10b981; }
+        .mag-medium { background-color: #f59e0b; }
+        .mag-large { background-color: #ef4444; }
+        .mag-huge { background-color: #7c3aed; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .leaflet-tooltip-custom { background: transparent !important; border: none !important; box-shadow: none !important; font-size: 11px; color: white; font-weight: bold; text-shadow: 0px 1px 3px rgba(0,0,0,0.8); white-space: nowrap; }
+        .leaflet-tooltip-custom::before { display: none !important; }
+        .map-floating-header { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(0, 0, 0, 0.6); color: white; backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 9999px; padding: 6px 14px; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; pointer-events: none; white-space: nowrap; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .map-floating-header span { background-color: #dc2626; color: white; font-size: 11px; padding: 1px 6px; border-radius: 4px; font-weight: 900; }
+        .map-overlay-controls { position: absolute; top: 16px; left: 16px; z-index: 1000; display: flex; flex-direction: row; gap: 10px; }
+        .map-overlay-controls button { width: 44px; height: 44px; background: rgba(255, 255, 255, 0.95); border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: #1f2937; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: all 0.2s; }
+        .map-overlay-controls button:hover { background: #ffffff; transform: translateY(-1px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+        .map-overlay-controls button svg { width: 22px; height: 22px; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="map"></div>
+
+    <!-- 地図上のタイトル表示 -->
+    <div class="map-floating-header">
+        <span>EWC</span>
+        <h1>世界地震情報</h1>
+    </div>
+
+    <div class="map-overlay-controls">
+        <button id="toggleSidebar" title="リストを表示">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+        </button>
+        <button id="refreshBtn" title="更新">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0113.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+        </button>
+        <!-- 日本ボタンを廃止 -->
+        <button id="resetViewBtn" title="表示エリアをリセット">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15h4.5M9 15l5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15v4.5M15 15h-4.5M15 15l-5.25 5.25" />
+            </svg>
+        </button>
+    </div>
+
+    <!-- 凡例 -->
+    <div class="fixed bottom-6 right-6 z-[1000] bg-white/95 backdrop-blur rounded-lg shadow-lg p-3 border border-gray-200 text-xs text-gray-700 pointer-events-none">
+        <div class="font-bold text-gray-800 mb-1">マグニチュード</div>
+        <div class="flex items-center gap-2 py-0.5"><span style="color:#10b981; font-size:16px; font-weight:900;">×</span> M 3.0未満</div>
+        <div class="flex items-center gap-2 py-0.5"><span style="color:#f59e0b; font-size:16px; font-weight:900;">×</span> M 3.0 - 4.9</div>
+        <div class="flex items-center gap-2 py-0.5"><span style="color:#ef4444; font-size:16px; font-weight:900;">×</span> M 5.0 - 6.9</div>
+        <div class="flex items-center gap-2 py-0.5"><span style="color:#7c3aed; font-size:16px; font-weight:900;">×</span> M 7.0以上</div>
+    </div>
+
+    <!-- 左サイドバー -->
+    <div id="sidebar" class="sidebar-open fixed top-0 left-0 h-full w-[340px] bg-white shadow-2xl flex flex-col">
+        <div class="p-5 border-b bg-gray-50 flex justify-between items-center">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded">EWC</span>
+                    <h2 class="font-bold text-lg text-gray-900">世界地震情報</h2>
+                </div>
+                <p id="count" class="text-xs text-gray-500 mt-1">取得中...</p>
+            </div>
+            <button id="closeSidebar" class="text-gray-400 hover:text-gray-600 text-2xl font-light w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 transition">
+                &times;
+            </button>
+        </div>
+        <div id="earthquakeList" class="flex-grow overflow-y-auto p-5 space-y-4 custom-scrollbar">
+            <div class="flex justify-center items-center h-full text-gray-400 text-sm italic">
+                データを読み込み中...
+            </div>
+        </div>
+        <div class="p-4 border-t bg-gray-50 text-[10px] text-gray-400 text-center font-medium">
+            Source: USGS & P2P地震情報 | Time: JST
+        </div>
+    </div>
+
+    <script>
+        const GLOBAL_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2025-10-24&endtime=2025-11-25&minmagnitude=0&limit=20000";
+        const JAPAN_URL = "https://api.p2pquake.net/v2/history?codes=551&limit=100";
+        const TAIWAN_AREA_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=21&maxlatitude=26&minlongitude=119&maxlongitude=123";
+        const COASTLINE_JSON_URL = "https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_land.geojson";
+        const TARGET_AREA = { minLat: 15, maxLat: 47, minLng: 95, maxLng: 155 };
+        const map = L.map('map', { attributionControl: false, zoomControl: false, worldCopyJump: true }).setView([30, 130], 4);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(map);
+        let markerGroup = L.layerGroup().addTo(map);
+        const svgHtml = `
+            <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M18 6L6 18M6 6L18 18" stroke="${strokeColor}" stroke-width="${strokeWidth + 2}" stroke-linecap="round" />
+                <path d="M18 6L6 18M6 6L18 18" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" />
+            </svg>
+        `;
+        function createCrossIcon(mag) {
+            let color = "#10b981";
+            let size = 14;
+            let strokeWidth = 1.5;
+            if (mag >= 7) { color = "#7c3aed"; size = 32; strokeWidth = 2.5; }
+            else if (mag >= 5) { color = "#ef4444"; size = 26; strokeWidth = 2; }
+            else if (mag >= 3) { color = "#f59e0b"; size = 18; strokeWidth = 1.5; }
+            const strokeColor = "#FFFFFF";
+            const svgHtml = `
+                <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M18 6L6 18M6 6L18 18" stroke="${strokeColor}" stroke-width="${strokeWidth + 2}" stroke-linecap="round" stroke-opacity="0.8" />
+                    <path d="M18 6L6 18M6 6L18 18" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" />
+                </svg>
+            `;
+            return L.divIcon({ className: 'custom-cross-icon', html: svgHtml, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+        }
+        async function initMap() {
+            try {
+                const response = await fetch(COASTLINE_JSON_URL);
+                const data = await response.json();
+                L.geoJSON(data, { style: { color: "#FFFFFF", weight: 0.5, fillColor: "#FFFFFF", fillOpacity: 0 } }).addTo(map);
+            } catch (error) { console.error("海岸線の描画に失敗しました:", error); }
+        }
+        async function fetchEarthquakeData() {
+            const listContainer = document.getElementById('earthquakeList');
+            const countElement = document.getElementById('count');
+            const refreshBtn = document.getElementById('refreshBtn');
+            try {
+                refreshBtn.disabled = true;
+                refreshBtn.classList.add('opacity-50');
+                const [globalRes, japanRes, taiwanRes] = await Promise.all([
+                    fetch(GLOBAL_URL).then(r => r.json()),
+                    fetch(JAPAN_URL).then(r => r.json()),
+                    fetch(TAIWAN_AREA_URL).then(r => r.json())
+                ]);
+                const globalEvents = globalRes.features.map(f => ({
+                    mag: f.properties.mag, place: f.properties.place, time: f.properties.time,
+                    lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], depth: f.geometry.coordinates[2], source: 'USGS'
+                }));
+                const japanEvents = japanRes.map(item => {
+                    const eq = item.earthquake;
+                    return {
+                        mag: eq.hypocenter.magnitude, place: eq.hypocenter.name, time: new Date(eq.time).getTime(),
+                        lat: eq.hypocenter.latitude, lng: eq.hypocenter.longitude, depth: eq.hypocenter.depth, source: 'P2P'
+                    };
+                });
+                const taiwanEvents = taiwanRes.features.map(f => ({
+                    mag: f.properties.mag, place: f.properties.place, time: f.properties.time,
+                    lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], depth: f.geometry.coordinates[2], source: 'USGS'
+                }));
+                const seenKeys = new Set();
+                const allEvents = [...globalEvents, ...japanEvents, ...taiwanEvents];
+                const uniqueEvents = allEvents.filter(eq => {
+                    const timeKey = Math.floor(eq.time / 10000) * 10000;
+                    const key = `${eq.lat.toFixed(2)}_${eq.lng.toFixed(2)}_${timeKey}_${eq.mag}`;
+                    if (seenKeys.has(key)) return false;
+                    seenKeys.add(key);
+                    return true;
+                });
+                const sortedEvents = uniqueEvents.sort((a, b) => b.time - a.time);
+                const displayEvents = sortedEvents.slice(0, 300);
+                markerGroup.clearLayers();
+                listContainer.innerHTML = '';
+                const combinedEvents = displayEvents.filter(eq => {
+                    const inArea = eq.lat >= TARGET_AREA.minLat && eq.lat <= TARGET_AREA.maxLat && eq.lng >= TARGET_AREA.minLng && eq.lng <= TARGET_AREA.maxLng;
+                    if (inArea) return true;
+                    const mag = eq.mag || 0;
+                    if (mag >= 5.0) return true;
+                    return false;
+                });
+                countElement.textContent = `${combinedEvents.length}件の情報を表示中`;
+                combinedEvents.forEach(eq => {
+                    const marker = L.marker([eq.lat, eq.lng], { icon: createCrossIcon(eq.mag) });
+                    marker.bindTooltip(`M${eq.mag.toFixed(1)}`, { permanent: true, direction: 'top', offset: [0, -12], className: 'leaflet-tooltip-custom', opacity: 1 });
+                    marker.addTo(markerGroup);
+                    const date = new Date(eq.time);
+                    const timeStr = date.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/\//g, '/');
+                    const isJapan = eq.source === 'P2P';
+                    const isTaiwan = eq.source === 'USGS' && eq.lat >= 21 && eq.lat <= 26 && eq.lng >= 119 && eq.lng <= 123;
+                    const flag = eq.isJapan ? "🇯🇵 " : (eq.isTaiwan ? " " : "");
+                    const mag = eq.mag || 0;
+                    let magClass = 'mag-small';
+                    if (mag >= 7) magClass = 'mag-huge';
+                    else if (mag >= 5) magClass = 'mag-large';
+                    else if (mag >= 3) magClass = 'mag-medium';
+                    const card = document.createElement('div');
+                    card.className = 'bg-white border border-gray-200 rounded-lg p-3 shadow-sm hover:shadow-md transition cursor-pointer flex flex-col gap-1';
+                    card.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <span class="mag-badge ${magClass}">M${mag.toFixed(1)}</span>
+                            <span class="text-xs text-gray-500">${timeStr}</span>
+                        </div>
+                        <div class="text-sm text-gray-800 font-medium leading-snug">
+                            ${flag}${eq.place}
+                        </div>
+                        <div class="flex justify-between items-center mt-1">
+                            <span class="text-xs text-gray-500">深さ: 約${eq.depth === null || eq.depth === undefined ? '不明' : Math.round(eq.depth) + 'km'}</span>
+                            <button class="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 transition">MAPへ</button>
+                        </div>
+                    `;
+                    card.addEventListener('click', () => {
+                        const currentZoom = map.getZoom();
+                        const zoom = Math.max(currentZoom, 6);
+                        map.flyTo([eq.lat, eq.lng], zoom, { duration: 1.5 });
+                        const latLng = L.latLng(eq.lat, eq.lng);
+                        const popup = L.popup({ offset: [0, -10] })
+                            .setLatLng(latLng)
+                            .setContent(`<div style="min-width: 200px;"><div style="font-weight: bold; font-size: 15px; color: #dc2626;">M${mag.toFixed(1)} - ${eq.place}</div><div style="font-size: 12px; color: #6b7280; margin-top: 4px;">発生時刻 (JST): ${timeStr}</div><div style="font-size: 12px; color: #6b7280;">深さ: 約${eq.depth === null || eq.depth === undefined ? '不明' : Math.round(eq.depth) + 'km'}</div><div style="font-size: 12px; color: #6b7280;">緯度: ${eq.lat.toFixed(2)} / 経度: ${eq.lng.toFixed(2)}</div></div>`);
+                        popup.openOn(map);
+                    });
+                    listContainer.appendChild(card);
+                });
+            } catch (e) {
+                console.error("データ取得エラー:", e);
+                listContainer.innerHTML = '<div class="text-red-500 text-sm text-center p-4">データの取得に失敗しました。<br>しばらくしてから更新してください。</div>';
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.classList.remove('opacity-50');
+            }
+        }
+        function openSidebar() { document.getElementById('sidebar').classList.remove('sidebar-closed'); document.getElementById('sidebar').classList.add('sidebar-open'); }
+        function closeSidebar() { document.getElementById('sidebar').classList.remove('sidebar-open'); document.getElementById('sidebar').classList.add('sidebar-closed'); }
+        function showAllMarkers() {
+            const allMarkers = [];
+            markerGroup.eachLayer(layer => { allMarkers.push(layer.getLatLng()); });
+            if (allMarkers.length > 0) { const bounds = L.latLngBounds(allMarkers); map.flyToBounds(bounds, { padding: [50, 50], duration: 1.5 }); }
+            else { map.setView([30, 130], 4); }
+        }
+        window.onload = async () => {
+            await initMap();
+            fetchEarthquakeData();
+            document.getElementById('toggleSidebar').addEventListener('click', openSidebar);
+            document.getElementById('closeSidebar').addEventListener('click', closeSidebar);
+            document.getElementById('refreshBtn').addEventListener('click', fetchEarthquakeData);
+            document.getElementById('resetViewBtn').addEventListener('click', showAllMarkers);
+        };
+    </script>
+</body>
+</html>
