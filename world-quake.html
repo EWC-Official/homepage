@@ -96,7 +96,10 @@
     </div>
 
     <script>
-        const GLOBAL_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2025-10-24&endtime=2025-11-25&minmagnitude=0&limit=20000";
+        const _fmtDate = d => d.toISOString().slice(0, 10);
+        const _endDate = new Date();
+        const _startDate = new Date(_endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const GLOBAL_URL = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${_fmtDate(_startDate)}&endtime=${_fmtDate(_endDate)}&minmagnitude=0&limit=20000`;
         const JAPAN_URL = "https://api.p2pquake.net/v2/history?codes=551&limit=100";
         const TAIWAN_AREA_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=21&maxlatitude=26&minlongitude=119&maxlongitude=123";
         const COASTLINE_JSON_URL = "https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_land.geojson";
