@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="ja" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EWC気象情報ポータル - 洪水・土砂災害警戒情報</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .category-header {
+            position: sticky;
+            top: 73px;
+            z-index: 10;
+            backdrop-filter: blur(8px);
+        }
+
+        .entry-card {
+            transition: all 0.15s ease;
+        }
+
+        .weather-text {
+            line-height: 2.1;
+            letter-spacing: 0.02em;
+        }
+
+        #contentArea {
+            transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* 横幅いっぱいに広げるための調整 */
+        .full-width-container {
+            width: 100%;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        @media (min-width: 768px) {
+            .full-width-container {
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+        }
+        @media (min-width: 1024px) {
+            .full-width-container {
+                padding-left: 4rem;
+                padding-right: 4rem;
+            }
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            950: '#0b0f19',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-white text-slate-800 dark:bg-slate-950 dark:text-slate-100 overflow-y-auto w-full min-h-screen">
+
+    <div class="min-h-screen flex flex-col w-full">
+        <!-- ヘッダー -->
+        <header class="sticky top-0 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-20 flex flex-col shadow-sm border-b border-slate-100 dark:border-slate-900 w-full">
+            <div class="py-4 full-width-container">
+                <div class="w-full flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="flex flex-col">
+                            <h1 class="text-sm md:text-base font-black tracking-widest text-slate-800 dark:text-slate-200 uppercase">EWC 洪水・土砂災害情報</h1>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4">
+                        <div id="lastUpdate" class="text-[9px] font-bold text-slate-400 dark:text-slate-500 tabular-nums"></div>
+                        
+                        <!-- 更新（これ以外は非表示） -->
+                        <button onclick="fetchFeeds()" class="p-1.5 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-lg transition-colors text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200" title="データを再読み込み">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="flex-1 w-full full-width-container pb-20">
+            <div id="entryList" class="divide-y divide-slate-100 dark:divide-slate-900 mt-4">
+                <div class="py-20 text-center text-slate-300 dark:text-slate-700">
+                    <div class="inline-block h-5 w-5 border-2 border-slate-200 dark:border-slate-800 border-t-blue-500 rounded-full animate-spin"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 個別詳細表示ビュー -->
+        <section id="contentArea" class="fixed inset-0 z-50 bg-white dark:bg-slate-950 overflow-y-auto hidden opacity-0 translate-y-4">
+            <div class="sticky top-0 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md full-width-container py-4 border-b border-slate-100 dark:border-slate-900 flex items-center justify-between z-30">
+                <button onclick="closeDetail()" class="flex items-center gap-2 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 transition-colors">
+                    <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                    <span class="text-[10px] font-bold tracking-widest uppercase">閉じる</span>
+                </button>
+            </div>
+            
+            <div id="detailView" class="w-full full-width-container py-8 md:py-14 pb-32">
+                <div id="detailContainer" class="w-full max-w-5xl mx-auto"></div>
+            </div>
+        </section>
+    </div>
+
+    <!-- 各種電文用の高品質デモデータ (オフライン/CORS回避時用) -->
+    <script>
+        const MOCK_DATA = {
+            feeds: {
+                regular: `<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>`,
+                extra: `<?xml version="1.0" encoding="utf-8"?>
+                    <feed xmlns="http://www.w3.org/2005/Atom">
+                        <title>気象庁防災情報XMLフィード - 随時</title>
+                        <updated>2026-06-02T15:10:00+09:00</updated>
+                        <entry>
+                            <title>指定河川洪水予報（共同発表）</title>
+                            <link href="mock_flood_hirowatashi" type="application/xml"/>
+                            <id>mock_flood_hirowatashi</id>
+                            <updated>2026-06-02T15:10:00+09:00</updated>
+                            <author><name>宮崎地方気象台</name></author>
+                            <content type="text">【広渡川水系広渡川洪水予報 第４報】広渡川では、氾濫危険水位に到達し、氾濫のおそれあり</content>
+                        </entry>
+                        <entry>
+                            <title>指定河川洪水予報（共同発表）</title>
+                            <link href="mock_flood_tone" type="application/xml"/>
+                            <id>mock_flood_tone</id>
+                            <updated>2026-06-02T14:45:00+09:00</updated>
+                            <author><name>前橋地方気象台</name></author>
+                            <content type="text">【利根川上流洪水予報 第１報】利根川上流では避難判断水位に達する見込み</content>
+                        </entry>
+                        <entry>
+                            <title>土砂災害警戒情報（都道府県共同発表）</title>
+                            <link href="mock_landslide_shizuoka" type="application/xml"/>
+                            <id>mock_landslide_shizuoka</id>
+                            <updated>2026-06-02T14:40:00+09:00</updated>
+                            <author><name>静岡地方気象台</name></author>
+                            <content type="text">【静岡県土砂災害警戒情報 第３報】土砂災害警戒情報が発表されました</content>
+                        </entry>
+                    </feed>`,
+                other: `<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>`
+            },
+            telegrams: {
+                "mock_flood_hirowatashi": `<?xml version="1.0" encoding="UTF-8"?>
+<Report xmlns="http://xml.kishou.go.jp/jmaxml1/" xmlns:jmx="http://xml.kishou.go.jp/jmaxml1/">
+  <Control>
+    <Title>指定河川洪水予報</Title>
+    <DateTime>2026-06-02T06:18:47Z</DateTime>
+    <Status>通常</Status>
+    <EditorialOffice>宮崎地方気象台</EditorialOffice>
+    <PublishingOffice>日南土木事務所 宮崎地方気象台</PublishingOffice>
+  </Control>
+  <Head xmlns="http://xml.kishou.go.jp/jmaxml1/informationBasis1/">
+    <Title>広渡川水系広渡川レベル４氾濫危険警報</Title>
+    <ReportDateTime>2026-06-02T15:10:00+09:00</ReportDateTime>
+    <TargetDateTime>2026-06-02T15:10:00+09:00</TargetDateTime>
+    <EventID>450040000100</EventID>
+    <InfoType>発表</InfoType>
+    <Serial>4</Serial>
+    <InfoKind>指定河川洪水予報</InfoKind>
+    <InfoKindVersion>1.1_1</InfoKindVersion>
+    <Headline>
+      <Text>【警戒レベル４相当情報［洪水］】〔警戒レベル３相当から４相当に切替〕広渡川水系広渡川では、氾濫危険水位に到達し、氾濫のおそれあり</Text>
+      <Information type="指定河川洪水予報（予報区域）">
+        <Item>
+          <Kind>
+            <Name>レベル４氾濫危険警報</Name>
+            <Code>40</Code>
+            <Condition>レベル４氾濫危険警報（発表）</Condition>
+          </Kind>
+          <Areas codeType="指定河川洪水予報（予報区域）">
+            <Area>
+              <Name>広渡川水系広渡川</Name>
+              <Code>450040000100</Code>
+            </Area>
+          </Areas>
+        </Item>
+      </Information>
+    </Headline>
+  </Head>
+  <Body xmlns="http://xml.kishou.go.jp/jmaxml1/body/meteorology1/" xmlns:jmx_eb="http://xml.kishou.go.jp/jmaxml1/elementBasis1/">
+    <Warning type="指定河川洪水予報">
+      <Item>
+        <Kind>
+          <Property>
+            <Type>主文</Type>
+            <Text>【警戒レベル３相当】谷之城橋基準観測所（日南市）受け持ち区間　これは、高齢者等避難の発令の目安です。広渡川の谷之城橋基準観測所（日南市）では、「避難判断水位」に到達しました。今後、「氾濫危険水位」に到達する見込みで、避難指示の発令の目安である警戒レベル４相当となる可能性があります。広渡川では堤防決壊等による氾濫のおそれあり、日南市では浸水するおそれがあります。市町村からの避難情報に十分注意するとともに、適切な防災行動をとってください。</Text>
+          </Property>
+        </Kind>
+        <Areas codeType="河川">
+          <Area>
+            <Name>広渡川</Name>
+            <Code>4500400001</Code>
+          </Area>
+        </Areas>
+        <Stations>
+          <Station>
+            <Name>谷之城橋</Name>
+            <Code type="水位観測所">45004000010000035</Code>
+            <Location>日南市</Location>
+          </Station>
+        </Stations>
+      </Item>
+      <Item>
+        <Kind>
+          <Property>
+            <Type>主文</Type>
+            <Text>【警戒レベル４相当】東郷橋基準観測所（日南市）受け持ち区間　これは、避難指示の発令の目安です。広渡川の東郷橋基準観測所（日南市）では、「氾濫危険水位」に到達しました。広渡川では堤防決壊等による氾濫のおそれあり、日南市では浸水するおそれがあります。直ちに、市町村からの避難情報を確認するとともに、各自安全確保を図るなど、適切な防災行動をとってください。</Text>
+          </Property>
+        </Kind>
+        <Areas codeType="河川">
+          <Area>
+            <Name>広渡川</Name>
+            <Code>4500400001</Code>
+          </Area>
+        </Areas>
+        <Stations>
+          <Station>
+            <Name>東郷橋</Name>
+            <Code type="水位観測所">45004000010000036</Code>
+            <Location>日南市</Location>
+          </Station>
+        </Stations>
+      </Item>
+      <Item>
+        <Kind>
+          <Name>浸水想定地区</Name>
+          <Code>1</Code>
+          <Status>対象地域</Status>
+          <Property>
+            <Type>浸水想定地区</Type>
+            <Text>氾濫による浸水が想定される地区※</Text>
+          </Property>
+        </Kind>
+        <Areas>
+          <Area codeType="水位観測所">
+            <Name>谷之城橋</Name>
+            <Code>45004000010000035</Code>
+            <Prefecture>宮崎県</Prefecture>
+            <PrefectureCode>45000</PrefectureCode>
+            <City>日南市</City>
+            <CityCode>4520400</CityCode>
+            <SubCityList>北郷町郷之原</SubCityList>
+          </Area>
+          <Area codeType="水位観測所">
+            <Name>東郷橋</Name>
+            <Code>45004000010000036</Code>
+            <Prefecture>宮崎県</Prefecture>
+            <PrefectureCode>45000</PrefectureCode>
+            <City>日南市</City>
+            <CityCode>4520400</CityCode>
+            <SubCityList>大字益安 北郷町大藤</SubCityList>
+          </Area>
+        </Areas>
+      </Item>
+    </Warning>
+    <MeteorologicalInfos type="雨量情報">
+      <MeteorologicalInfo>
+        <DateTime>2026-06-02T15:00:00+09:00</DateTime>
+        <Item>
+          <Kind>
+            <Name>雨量</Name>
+            <Property>
+              <Type>雨量</Type>
+              <Text>多いところで1時間に60ミリの雨が降っています。この雨は今後次第に弱まるでしょう。</Text>
+            </Property>
+          </Kind>
+        </Item>
+      </MeteorologicalInfo>
+      <TimeSeriesInfo>
+        <TimeDefines>
+          <TimeDefine timeId="1">
+            <DateTime>2026-06-02T09:00:00+09:00</DateTime>
+            <Duration>PT6H</Duration>
+            <Name>２日９時００分から２日１５時００分までの流域平均雨量</Name>
+          </TimeDefine>
+          <TimeDefine timeId="2">
+            <DateTime>2026-06-02T15:00:00+09:00</DateTime>
+            <Duration>PT3H</Duration>
+            <Name>２日１５時００分から２日１８時００分までの流域平均雨量の見込み</Name>
+          </TimeDefine>
+        </TimeDefines>
+        <Item>
+          <Kind>
+            <Name>雨量</Name>
+            <Property>
+              <Type>雨量</Type>
+              <PrecipitationPart>
+                <jmx_eb:Precipitation type="流域平均雨量" unit="ミリ" refID="1">180</jmx_eb:Precipitation>
+                <jmx_eb:Precipitation type="流域平均雨量" unit="ミリ" refID="2">30</jmx_eb:Precipitation>
+              </PrecipitationPart>
+            </Property>
+          </Kind>
+          <Area>
+            <Name>東郷橋上流域</Name>
+          </Area>
+        </Item>
+      </TimeSeriesInfo>
+      <TimeSeriesInfo>
+        <TimeDefines>
+          <TimeDefine timeId="1">
+            <DateTime>2026-06-02T09:00:00+09:00</DateTime>
+            <Duration>PT6H</Duration>
+            <Name>２日９時００分から２日１５時００分までの流域平均雨量</Name>
+          </TimeDefine>
+          <TimeDefine timeId="2">
+            <DateTime>2026-06-02T15:00:00+09:00</DateTime>
+            <Duration>PT3H</Duration>
+            <Name>２日１５時００分から２日１８時０0分までの流域平均雨量の見込み</Name>
+          </TimeDefine>
+        </TimeDefines>
+        <Item>
+          <Kind>
+            <Name>雨量</Name>
+            <Property>
+              <Type>雨量</Type>
+              <PrecipitationPart>
+                <jmx_eb:Precipitation type="流域平均雨量" unit="ミリ" refID="1">182</jmx_eb:Precipitation>
+                <jmx_eb:Precipitation type="流域平均雨量" unit="ミリ" refID="2">30</jmx_eb:Precipitation>
+              </PrecipitationPart>
+            </Property>
+          </Kind>
+          <Area>
+            <Name>谷之城橋上流域</Name>
+          </Area>
+        </Item>
+      </TimeSeriesInfo>
+    </MeteorologicalInfos>
+    <MeteorologicalInfos type="水位・流量情報">
+      <TimeSeriesInfo>
+        <TimeDefines>
+          <TimeDefine timeId="1"><DateTime>2026-06-02T15:00:00+09:00</DateTime><Name>現況</Name></TimeDefine>
+          <TimeDefine timeId="2"><DateTime>2026-06-02T15:10:00+09:00</DateTime><Name>10分後</Name></TimeDefine>
+          <TimeDefine timeId="3"><DateTime>2026-06-02T15:20:00+09:00</DateTime><Name>20分後</Name></TimeDefine>
+          <TimeDefine timeId="4"><DateTime>2026-06-02T15:30:00+09:00</DateTime><Name>30分後</Name></TimeDefine>
+          <TimeDefine timeId="5"><DateTime>2026-06-02T15:40:00+09:00</DateTime><Name>40分後</Name></TimeDefine>
+          <TimeDefine timeId="6"><DateTime>2026-06-02T15:50:00+09:00</DateTime><Name>50分後</Name></TimeDefine>
+          <TimeDefine timeId="7"><DateTime>2026-06-02T16:00:00+09:00</DateTime><Name>60分後</Name></TimeDefine>
+          <TimeDefine timeId="8"><DateTime>2026-06-02T16:10:00+09:00</DateTime><Name>70分後</Name></TimeDefine>
+          <TimeDefine timeId="9"><DateTime>2026-06-02T16:20:00+09:00</DateTime><Name>80分後</Name></TimeDefine>
+          <TimeDefine timeId="10"><DateTime>2026-06-02T16:30:00+09:00</DateTime><Name>90分後</Name></TimeDefine>
+          <TimeDefine timeId="11"><DateTime>2026-06-02T16:40:00+09:00</DateTime><Name>100分後</Name></TimeDefine>
+          <TimeDefine timeId="12"><DateTime>2026-06-02T16:50:00+09:00</DateTime><Name>110分後</Name></TimeDefine>
+          <TimeDefine timeId="13"><DateTime>2026-06-02T17:00:00+09:00</DateTime><Name>120分後</Name></TimeDefine>
+          <TimeDefine timeId="14"><DateTime>2026-06-02T17:10:00+09:00</DateTime><Name>130分後</Name></TimeDefine>
+          <TimeDefine timeId="15"><DateTime>2026-06-02T17:20:00+09:00</DateTime><Name>140分後</Name></TimeDefine>
+          <TimeDefine timeId="16"><DateTime>2026-06-02T17:30:00+09:00</DateTime><Name>150分後</Name></TimeDefine>
+          <TimeDefine timeId="17"><DateTime>2026-06-02T17:40:00+09:00</DateTime><Name>160分後</Name></TimeDefine>
+          <TimeDefine timeId="18"><DateTime>2026-06-02T17:50:00+09:00</DateTime><Name>170分後</Name></TimeDefine>
+          <TimeDefine timeId="19"><DateTime>2026-06-02T18:00:00+09:00</DateTime><Name>180分後</Name></TimeDefine>
+          <TimeDefine timeId="20"><DateTime>2026-06-02T19:00:00+09:00</DateTime><Name>240分後</Name></TimeDefine>
+          <TimeDefine timeId="21"><DateTime>2026-06-02T20:00:00+09:00</DateTime><Name>300分後</Name></TimeDefine>
+          <TimeDefine timeId="22"><DateTime>2026-06-02T21:00:00+09:00</DateTime><Name>360分後</Name></TimeDefine>
+        </TimeDefines>
+        <Item>
+          <Kind>
+            <Name>水位</Name>
+            <Property>
+              <Type>水位</Type>
+              <WaterLevelPart>
+                <jmx_eb:WaterLevel type="水位" refID="1" unit="m" condition="正常">5.48</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="1">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="2" unit="m" condition="正常">5.65</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="2">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="3" unit="m" condition="正常">5.65</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="3">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="4" unit="m" condition="正常">5.64</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="4">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="5" unit="m" condition="正常">5.65</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="5">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="6" unit="m" condition="正常">5.66</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="6">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="7" unit="m" condition="正常">5.64</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="7">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="8" unit="m" condition="正常">5.62</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="8">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="9" unit="m" condition="正常">5.59</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="9">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="10" unit="m" condition="正常">5.54</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="10">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="11" unit="m" condition="正常">5.48</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="11">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="12" unit="m" condition="正常">5.41</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="12">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="13" unit="m" condition="正常">5.33</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="13">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="14" unit="m" condition="正常">5.26</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="14">2</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="15" unit="m" condition="正常">5.18</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="15">2</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="16" unit="m" condition="正常">5.11</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="16">2</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="17" unit="m" condition="正常">5.05</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="17">1</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="18" unit="m" condition="正常">4.99</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="18">1</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="19" unit="m" condition="正常">4.93</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="19">1</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="20" unit="m" condition="欠測"/>
+                <jmx_eb:WaterLevel type="レベル" refID="20"/>
+                <jmx_eb:WaterLevel type="水位" refID="21" unit="m" condition="欠測"/>
+                <jmx_eb:WaterLevel type="レベル" refID="21"/>
+                <jmx_eb:WaterLevel type="水位" refID="22" unit="m" condition="欠測"/>
+                <jmx_eb:WaterLevel type="レベル" refID="22"/>
+              </WaterLevelPart>
+            </Property>
+          </Kind>
+          <Station>
+            <Name>谷之城橋</Name>
+            <Code type="水位観測所">45004000010000035</Code>
+            <Location>日南市</Location>
+          </Station>
+        </Item>
+        <Item>
+          <Kind>
+            <Name>水位</Name>
+            <Property>
+              <Type>水位</Type>
+              <WaterLevelPart>
+                <jmx_eb:WaterLevel type="水位" refID="1" unit="m" condition="正常">4.16</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="1">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="2" unit="m" condition="正常">4.07</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="2">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="3" unit="m" condition="正常">4.05</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="3">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="4" unit="m" condition="正常">4.02</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="4">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="5" unit="m" condition="正常">4.01</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="5">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="6" unit="m" condition="正常">4.05</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="6">3</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="7" unit="m" condition="正常">4.12</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="7">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="8" unit="m" condition="正常">4.18</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="8">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="9" unit="m" condition="正常">4.25</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="9">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="10" unit="m" condition="正常">4.52</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="10">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="11" unit="m" condition="正常">4.51</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="11">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="12" unit="m" condition="正常">4.48</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="12">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="13" unit="m" condition="正常">4.48</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="13">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="14" unit="m" condition="正常">4.47</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="14">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="15" unit="m" condition="正常">4.44</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="15">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="16" unit="m" condition="正常">4.40</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="16">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="17" unit="m" condition="正常">4.36</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="17">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="18" unit="m" condition="正常">4.30</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="18">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="19" unit="m" condition="正常">4.23</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="レベル" refID="19">4</jmx_eb:WaterLevel>
+                <jmx_eb:WaterLevel type="水位" refID="20" unit="m" condition="欠測"/>
+                <jmx_eb:WaterLevel type="レベル" refID="20"/>
+                <jmx_eb:WaterLevel type="水位" refID="21" unit="m" condition="欠測"/>
+                <jmx_eb:WaterLevel type="レベル" refID="21"/>
+                <jmx_eb:WaterLevel type="水位" refID="22" unit="m" condition="欠測"/>
+                <jmx_eb:WaterLevel type="レベル" refID="22"/>
+              </WaterLevelPart>
+            </Property>
+          </Kind>
+          <Station>
+            <Name>東郷橋</Name>
+            <Code type="水位観測所">45004000010000036</Code>
+            <Location>日南市</Location>
+          </Station>
+        </Item>
+      </TimeSeriesInfo>
+    </MeteorologicalInfos>
+    <AdditionalInfo>
+      <FloodForecastAddition>
+        <HydrometricStationPart>
+          <Area codeType="水位観測所">
+            <Name>谷之城橋</Name>
+            <Code>45004000010000035</Code>
+            <SubCityList>宮崎県日南市北郷町郷之原</SubCityList>
+            <Location>日南市</Location>
+          </Area>
+          <ChargeSection>広渡川 右岸：宮崎県日南市北郷町郷之原字壱町田甲3871番1地先から宮崎県日南市北郷町大藤字桵原乙2117番9地先まで 左岸：宮崎県日南市北郷町郷之原甲字下村甲3713番3地先から宮崎県日南市北郷町大藤字宮園前甲488番2地先まで</ChargeSection>
+          <Criteria>
+            <jmx_eb:WaterLevel type="レベル１水防団待機水位" unit="m" condition="有効">4.70</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル２氾濫注意水位" unit="m" condition="有効">5.10</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル３避難判断水位" unit="m" condition="有効">5.30</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル４氾濫危険水位" unit="m" condition="有効">5.60</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル４計画高水位等" unit="m" condition="有効">8.10</jmx_eb:WaterLevel>
+          </Criteria>
+        </HydrometricStationPart>
+        <HydrometricStationPart>
+          <Area codeType="水位観測所">
+            <Name>東郷橋</Name>
+            <Code>45004000010000036</Code>
+            <SubCityList>宮崎県日南市大字益安 宮崎県日南市北郷町大藤</SubCityList>
+            <Location>日南市</Location>
+          </Area>
+          <ChargeSection>広渡川 右岸：宮崎県日南市北郷町大藤字桵原乙2117番地先9から海まで 左岸：宮崎県日南市北郷町大藤字宮園前甲488番2地先から海まで</ChargeSection>
+          <Criteria>
+            <jmx_eb:WaterLevel type="レベル１水防団待機水位" unit="m" condition="有効">3.20</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル２氾濫注意水位" unit="m" condition="有効">3.60</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル３避難判断水位" unit="m" condition="有効">3.80</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル４氾濫危険水位" unit="m" condition="有効">4.10</jmx_eb:WaterLevel>
+            <jmx_eb:WaterLevel type="レベル４計画高水位等" unit="m" condition="有効">5.50</jmx_eb:WaterLevel>
+          </Criteria>
+        </HydrometricStationPart>
+      </FloodForecastAddition>
+    </AdditionalInfo>
+  </Body>
+</Report>`,
+                "mock_flood_tone": `<?xml version="1.0" encoding="utf-8"?>
+                    <Report xmlns="http://xml.jma.go.jp/jmaxml1/">
+                        <Control>
+                            <Title>指定河川洪水予報</Title>
+                            <DateTime>2026-06-02T14:45:00+09:00</DateTime>
+                            <PublishingOffice>前橋地方気象台 群馬県</PublishingOffice>
+                        </Control>
+                        <Head xmlns="http://xml.jma.go.jp/jmaxml1/informationBasis1/">
+                            <Title>利根川上流洪水予報 第１報</Title>
+                            <ReportDateTime>2026-06-02T14:45:00+09:00</ReportDateTime>
+                            <Headline>
+                                <Text>利根川上流の八斗島水位観測所では、当分の間、「避難判断水位」付近の状態が続く見込みです。近隣の安全を第一に考えて行動してください。</Text>
+                            </Headline>
+                        </Head>
+                        <Body xmlns="http://xml.jma.go.jp/jmaxml1/body1/">
+                            <Comment>
+                                <Text type="本文">［河川名及び予報区域］
+利根川上流：群馬県、埼玉県
+
+［主文］
+利根川上流の八斗島水位観測所（群馬県伊勢崎市八斗島町）では、２日１４時３０分に「避難判断水位（レベル３）」に達しました。今後の雨量や水位、市町村からの避難情報などに十分注意してください。</Text>
+                            </Comment>
+                        </Body>
+                    </Report>`,
+                "mock_landslide_shizuoka": `<?xml version="1.0" encoding="utf-8"?>
+                    <Report xmlns="http://xml.jma.go.jp/jmaxml1/">
+                        <Control>
+                            <Title>土砂災害警戒情報</Title>
+                            <DateTime>2026-06-02T14:40:00+09:00</DateTime>
+                            <PublishingOffice>静岡地方気象台 静岡県</PublishingOffice>
+                        </Control>
+                        <Head xmlns="http://xml.jma.go.jp/jmaxml1/informationBasis1/">
+                            <Title>静岡県土砂災害警戒情報 第３報</Title>
+                            <ReportDateTime>2026-06-02T14:40:00+09:00</ReportDateTime>
+                            <Headline>
+                                <Text>大雨のため、崖崩れや土石流が発生しやすい状況が続いています。崖の近くなど土砂災害の危険性がある地域では、自治体の避難情報等に留意してください。</Text>
+                            </Headline>
+                        </Head>
+                        <Body xmlns="http://xml.jma.go.jp/jmaxml1/body1/">
+                            <Comment>
+                                <Text type="本文">［警戒対象地域］
+熱海市、伊東市、沼津市
+
+［主文］
+降り続く大雨のため、警戒対象地域では土砂災害の危険性が非常に高まっています。崖の近くや急傾斜地などの危険箇所には絶対に近づかないでください。また、夜間に向けて状況が悪化するおそれがあるため、早めの避難行動を心がけてください。</Text>
+                            </Comment>
+                        </Body>
+                    </Report>`
+            }
+        };
+    </script>
+
+    <!-- アプリケーション・ロジック -->
+    <script>
+        const FEEDS = [
+            "https://www.data.jma.go.jp/developer/xml/feed/regular.xml",
+            "https://www.data.jma.go.jp/developer/xml/feed/extra.xml",
+            "https://www.data.jma.go.jp/developer/xml/feed/other.xml"
+        ];
+
+        let allFetchedEntries = [];
+        let isDemoMode = false;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initDarkMode();
+            lucide.createIcons();
+            detectCORSandFetch();
+        });
+
+        // CORS制限やネットワーク状態の自動検出
+        async function detectCORSandFetch() {
+            try {
+                const response = await fetch(FEEDS[1], { method: 'HEAD' });
+                isDemoMode = false;
+            } catch (e) {
+                console.warn("気象庁への直接フェッチ制限を検出しました。内蔵デモデータを使用します。");
+                isDemoMode = true;
+            }
+            fetchFeeds();
+        }
+
+        function getXmlDocFromString(xmlText) {
+            const cleanText = xmlText.replace(/<(\/?)(\w+):/g, '<$1');
+            return new DOMParser().parseFromString(cleanText, "text/xml");
+        }
+
+        function formatToReiwa(date) {
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1;
+            const day = date.getDate();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const reiwaYear = year - 2018;
+            const eraName = year >= 2019 ? `令和${reiwaYear}年` : `${year}年`;
+            return `${eraName}${month}月${day}日 ${hours}:${minutes}`;
+        }
+
+        function extractFullTitle(entryXml) {
+            const content = entryXml.getElementsByTagName('content')[0]?.textContent || "";
+            const bracketMatch = content.match(/【([^】]+)】/);
+            if (bracketMatch && bracketMatch[1]) return bracketMatch[1].trim();
+            return entryXml.getElementsByTagName('title')[0]?.textContent || "";
+        }
+
+        function getNormalizedTitle(title) {
+            return title
+                .replace("（共同発表）", "")
+                .replace("(共同発表)", "")
+                .replace("（都道府県共同発表）", "")
+                .replace("(都道府県共同発表)", "");
+        }
+
+        function getGroupKey(item) {
+            const normalizedTitle = getNormalizedTitle(item.displayTitle);
+            const minutes = Math.floor(item.updated.getTime() / (1000 * 60));
+            return `${item.author}_${minutes}_${normalizedTitle}`;
+        }
+
+        // データの取得とパース（洪水予報: VPCC / 土砂警戒: VXKO50〜89）
+        async function fetchFeeds() {
+            try {
+                document.getElementById('entryList').innerHTML = `
+                    <div class="py-20 text-center text-slate-300 dark:text-slate-700">
+                        <div class="inline-block h-5 w-5 border-2 border-slate-200 dark:border-slate-800 border-t-blue-500 rounded-full animate-spin"></div>
+                    </div>`;
+
+                const allItems = [];
+
+                if (isDemoMode) {
+                    const feedsToParse = [MOCK_DATA.feeds.regular, MOCK_DATA.feeds.extra, MOCK_DATA.feeds.other];
+                    for (const feedText of feedsToParse) {
+                        const xmlDoc = new DOMParser().parseFromString(feedText, "text/xml");
+                        const entries = Array.from(xmlDoc.getElementsByTagName('entry'));
+                        parseEntries(entries, allItems);
+                    }
+                } else {
+                    for (const url of FEEDS) {
+                        let text = "";
+                        try {
+                            const res = await fetch(url);
+                            text = await res.text();
+                        } catch (e) {
+                            try {
+                                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                                const res = await fetch(proxyUrl);
+                                text = await res.text();
+                            } catch (err) {
+                                console.error(`フィード取得失敗(Live): ${url}`, err);
+                                continue;
+                            }
+                        }
+                        const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
+                        const entries = Array.from(xmlDoc.getElementsByTagName('entry'));
+                        parseEntries(entries, allItems);
+                    }
+                }
+
+                const uniqueItems = Array.from(new Map(allItems.map(item => [item.link, item])).values());
+                allFetchedEntries = uniqueItems; 
+
+                const tempGroups = {};
+                uniqueItems.forEach(item => {
+                    const key = getGroupKey(item);
+                    if (!tempGroups[key]) {
+                        tempGroups[key] = {
+                            key: key,
+                            displayTitle: item.displayTitle, 
+                            updated: item.updated,
+                            author: item.author,
+                            links: [] 
+                        };
+                    }
+                    tempGroups[key].links.push({
+                        url: item.link,
+                        code: item.code
+                    });
+
+                    tempGroups[key].displayTitle = item.displayTitle;
+                    tempGroups[key].code = item.code;
+                    tempGroups[key].link = item.link;
+                });
+
+                const latestGroups = {};
+                Object.values(tempGroups).forEach(groupItem => {
+                    if (!groupItem.link) {
+                        groupItem.link = groupItem.links[0].url;
+                        groupItem.code = groupItem.links[0].code;
+                    }
+
+                    const normTitle = getNormalizedTitle(groupItem.displayTitle);
+                    const dedupKey = `${groupItem.author}_${normTitle}`;
+
+                    if (!latestGroups[dedupKey]) {
+                        latestGroups[dedupKey] = groupItem;
+                    } else {
+                        if (groupItem.updated > latestGroups[dedupKey].updated) {
+                            latestGroups[dedupKey] = groupItem;
+                        }
+                    }
+                });
+
+                // 最新順にソート
+                const sortedList = Object.values(latestGroups).sort((a, b) => b.updated - a.updated);
+
+                renderList(sortedList);
+                document.getElementById('lastUpdate').innerText = `UPDATED: ${new Date().toLocaleTimeString('ja-JP')}`;
+            } catch (error) {
+                console.error(error);
+                document.getElementById('entryList').innerHTML = `<p class="py-20 text-center text-slate-400 dark:text-slate-600 text-xs">データの取得に失敗しました。時間をおいてもう一度お試しください。</p>`;
+            }
+        }
+
+        // 指定河川洪水予報「VPCC」・土砂災害警戒情報「VXKOii (ii=50-89)」を厳密にパース
+        function parseEntries(entries, targetList) {
+            for (let entry of entries) {
+                const link = entry.querySelector('link[type="application/xml"]')?.getAttribute('href') || entry.getElementsByTagName('link')[0]?.getAttribute('href');
+                if (!link) continue;
+                const code = (link.match(/_(V[A-Z0-9]+)_/) || [])[1] || "";
+                
+                // VPCC(指定河川洪水予報) であるかの判定
+                const isFlood = code.startsWith('VPCC');
+                
+                // VXKOii (ii=50-89) であるかの判定
+                const isLandslide = code.startsWith('VXKO') && (function() {
+                    const numPart = code.substring(4);
+                    const num = parseInt(numPart, 10);
+                    return !isNaN(num) && num >= 50 && num <= 89;
+                })();
+
+                if (!isFlood && !isLandslide) continue;
+
+                let displayTitle = extractFullTitle(entry);
+                const author = entry.getElementsByTagName('author')[0]?.getElementsByTagName('name')[0]?.textContent || "気象庁";
+                const updated = new Date(entry.getElementsByTagName('updated')[0]?.textContent);
+                const content = entry.getElementsByTagName('content')[0]?.textContent || "";
+
+                targetList.push({
+                    updated, author, link, code, displayTitle, content
+                });
+            }
+        }
+
+        // 単一フィードとしてのすっきりとした一覧表示
+        function renderList(list) {
+            const container = document.getElementById('entryList');
+            container.innerHTML = "";
+
+            const header = document.createElement('div');
+            header.className = "category-header px-4 py-2 border-b border-slate-100/50 dark:border-slate-900/50 bg-white/95 dark:bg-slate-950/95";
+            header.innerHTML = `<span class="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">現在発表中の洪水・土砂災害警戒情報</span>`;
+            container.appendChild(header);
+
+            if (list.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = "px-4 py-16 text-center";
+                empty.innerHTML = `<p class="text-[10px] font-bold text-slate-300 dark:text-slate-700 uppercase tracking-widest italic">現在、発表されている情報はありません</p>`;
+                container.appendChild(empty);
+            } else {
+                list.forEach(item => {
+                    const btn = document.createElement('button');
+                    btn.className = "entry-card w-full text-left px-4 py-5 outline-none border-b border-slate-100 dark:border-slate-900 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors";
+                    
+                    const isFlood = item.code.startsWith('VPCC');
+                    const badgeText = isFlood ? "洪水予報" : "土砂災害警戒";
+                    const badgeClass = isFlood 
+                        ? "bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400"
+                        : "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400";
+                    
+                    btn.innerHTML = `
+                        <div class="space-y-2">
+                            <div class="flex items-center flex-wrap gap-2">
+                                <span class="px-1.5 py-0.5 ${badgeClass} font-black rounded text-[8px] tracking-wider uppercase">${badgeText}</span>
+                                <h3 class="text-[11px] md:text-xs font-bold text-slate-700 dark:text-slate-300 leading-tight">${item.displayTitle}</h3>
+                            </div>
+                            <div class="flex items-center gap-2 text-[8px] font-bold text-slate-400 dark:text-slate-600">
+                                <span class="tabular-nums">${formatToReiwa(item.updated)}</span>
+                                <span>|</span>
+                                <span>${item.author}</span>
+                            </div>
+                        </div>
+                    `;
+                    btn.onclick = () => fetchDetail(item);
+                    container.appendChild(btn);
+                });
+            }
+            lucide.createIcons();
+        }
+
+        // 詳細情報の取得・解析表示
+        async function fetchDetail(item) {
+            const area = document.getElementById('contentArea');
+            area.classList.remove('hidden');
+            setTimeout(() => area.classList.remove('opacity-0', 'translate-y-4'), 10);
+            document.body.style.overflow = 'hidden';
+            
+            const container = document.getElementById('detailContainer');
+            container.innerHTML = `
+                <div class="py-40 text-center w-full">
+                    <div class="inline-block h-4 w-4 border-2 border-slate-100 dark:border-slate-900 border-t-blue-500 rounded-full animate-spin"></div>
+                </div>`;
+
+            try {
+                const linksToFetch = item.links || [{ url: item.link, code: item.code }];
+                
+                const fetchResults = await Promise.allSettled(linksToFetch.map(async (l) => {
+                    let rawXmlText = "";
+                    if (isDemoMode && MOCK_DATA.telegrams[l.url]) {
+                        rawXmlText = MOCK_DATA.telegrams[l.url];
+                    } else {
+                        try {
+                            const res = await fetch(l.url);
+                            rawXmlText = await res.text();
+                        } catch (err) {
+                            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(l.url)}`;
+                            const res = await fetch(proxyUrl);
+                            rawXmlText = await res.text();
+                        }
+                    }
+                    const doc = getXmlDocFromString(rawXmlText);
+                    return { code: l.code, rawXmlText, doc };
+                }));
+
+                let headline = "";
+                let bodyText = "";
+                
+                // 高度な詳細情報の抽出用オブジェクト
+                let stationsData = {}; // 観測所ごとの予測水位や基準しきい値を格納
+                let rainInfos = [];    // 雨量情報の格納
+                let inundationRegions = {}; // 浸水想定地区の格納
+
+                fetchResults.forEach(result => {
+                    if (result.status !== 'fulfilled') return;
+
+                    const { code, doc } = result.value;
+
+                    if (!headline) {
+                        headline = doc.getElementsByTagName('Headline')[0]?.getElementsByTagName('Text')[0]?.textContent || "";
+                    }
+
+                    const bodyPart = doc.getElementsByTagName('Body')[0];
+                    if (!bodyPart) return;
+
+                    // 1. 各水位観測所の基準水位(Criteria)のパース
+                    const stationParts = doc.getElementsByTagName('HydrometricStationPart');
+                    for (let sp of stationParts) {
+                        const stName = sp.getElementsByTagName('Area')[0]?.getElementsByTagName('Name')[0]?.textContent;
+                        if (stName) {
+                            if (!stationsData[stName]) stationsData[stName] = {};
+                            stationsData[stName].chargeSection = sp.getElementsByTagName('ChargeSection')[0]?.textContent || "";
+                            
+                            const criteria = {};
+                            const wlNodes = sp.getElementsByTagName('Criteria')[0]?.getElementsByTagName('WaterLevel') || [];
+                            for (let node of wlNodes) {
+                                const typeAttr = node.getAttribute('type') || "";
+                                const val = parseFloat(node.textContent);
+                                if (!isNaN(val)) {
+                                    criteria[typeAttr] = val;
+                                }
+                            }
+                            stationsData[stName].criteria = criteria;
+                        }
+                    }
+
+                    // 2. 水位時系列推移データ(TimeSeriesInfo)のパース
+                    const timeSeriesNodes = doc.getElementsByTagName('TimeSeriesInfo');
+                    for (let ts of timeSeriesNodes) {
+                        const timeDefines = ts.getElementsByTagName('TimeDefines')[0]?.getElementsByTagName('TimeDefine') || [];
+                        const timeMap = {};
+                        for (let td of timeDefines) {
+                            const tId = td.getAttribute('timeId');
+                            const tName = td.getElementsByTagName('Name')[0]?.textContent || "";
+                            timeMap[tId] = tName;
+                        }
+
+                        const items = ts.getElementsByTagName('Item');
+                        for (let it of items) {
+                            const kindName = it.getElementsByTagName('Name')[0]?.textContent;
+                            if (kindName === '水位') {
+                                const stName = it.getElementsByTagName('Station')[0]?.getElementsByTagName('Name')[0]?.textContent;
+                                if (stName) {
+                                    if (!stationsData[stName]) stationsData[stName] = {};
+                                    
+                                    const wlPart = it.getElementsByTagName('WaterLevelPart')[0]?.getElementsByTagName('WaterLevel') || [];
+                                    const timeSeriesList = [];
+                                    
+                                    // 時系列の値をrefIDをベースに整理
+                                    const valuesByRef = {};
+                                    for (let wl of wlPart) {
+                                        const refId = wl.getAttribute('refID');
+                                        const typeAttr = wl.getAttribute('type');
+                                        if (!valuesByRef[refId]) valuesByRef[refId] = {};
+                                        
+                                        if (typeAttr === '水位') {
+                                            valuesByRef[refId].value = wl.textContent;
+                                        } else if (typeAttr === 'レベル') {
+                                            valuesByRef[refId].level = wl.textContent;
+                                        }
+                                    }
+
+                                    // timeMap と紐付けて時系列リストを生成
+                                    Object.keys(valuesByRef).forEach(refId => {
+                                        const tName = timeMap[refId] || `時間ID:${refId}`;
+                                        timeSeriesList.push({
+                                            timeName: tName,
+                                            value: valuesByRef[refId].value || "欠測",
+                                            level: valuesByRef[refId].level || null
+                                        });
+                                    });
+
+                                    stationsData[stName].timeSeries = timeSeriesList;
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. 浸水想定地区の抽出
+                    const warningItems = doc.getElementsByTagName('Warning')[0]?.getElementsByTagName('Item') || [];
+                    for (let wItem of warningItems) {
+                        const wName = wItem.getElementsByTagName('Name')[0]?.textContent || "";
+                        if (wName === '浸水想定地区') {
+                            const areas = wItem.getElementsByTagName('Areas')[0]?.getElementsByTagName('Area') || [];
+                            for (let area of areas) {
+                                const stRef = area.getElementsByTagName('Name')[0]?.textContent;
+                                const subCities = area.getElementsByTagName('SubCityList')[0]?.textContent;
+                                if (stRef && subCities) {
+                                    inundationRegions[stRef] = subCities;
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. 雨量情報の抽出
+                    const rainTimeSeries = doc.getElementsByTagName('MeteorologicalInfos');
+                    for (let rInfo of rainTimeSeries) {
+                        if (rInfo.getAttribute('type') === '雨量情報') {
+                            const tsInfos = rInfo.getElementsByTagName('TimeSeriesInfo');
+                            for (let ts of tsInfos) {
+                                const areaName = ts.getElementsByTagName('Area')[0]?.getElementsByTagName('Name')[0]?.textContent || "流域";
+                                const timeDefines = ts.getElementsByTagName('TimeDefines')[0]?.getElementsByTagName('TimeDefine') || [];
+                                const tMap = {};
+                                for (let td of timeDefines) {
+                                    const tId = td.getAttribute('timeId');
+                                    tMap[tId] = td.getElementsByTagName('Name')[0]?.textContent || "";
+                                }
+
+                                const precPart = ts.getElementsByTagName('PrecipitationPart')[0]?.getElementsByTagName('Precipitation') || [];
+                                const rainList = [];
+                                for (let pr of precPart) {
+                                    const refId = pr.getAttribute('refID');
+                                    const unit = pr.getAttribute('unit') || "mm";
+                                    rainList.push({
+                                        title: tMap[refId] || "雨量情報",
+                                        value: pr.textContent,
+                                        unit: unit
+                                    });
+                                }
+                                rainInfos.push({ area: areaName, data: rainList });
+                            }
+                        }
+                    }
+
+                    // 5. 汎用テキスト本文
+                    const commentTags = bodyPart.getElementsByTagName('Comment');
+                    if (!bodyText || (commentTags && commentTags.length > 0)) {
+                        let text = "";
+                        if (commentTags && commentTags.length > 0) {
+                            const texts = commentTags[0].getElementsByTagName('Text');
+                            for (let t of texts) { 
+                                if (t.getAttribute('type') === '本文' || !text) text = t.textContent; 
+                            }
+                        }
+                        if (!text) {
+                            text = bodyPart.getElementsByTagName('Text')[0]?.textContent || "";
+                        }
+                        if (text && text.trim() !== "") {
+                            bodyText = text;
+                        }
+                    }
+                });
+
+                // --- 構造化された水位/雨量ビューの構築 ---
+                let structuredDetailsHtml = "";
+
+                // 各観測所の詳細情報をレンダリング
+                const stationNames = Object.keys(stationsData);
+                if (stationNames.length > 0) {
+                    structuredDetailsHtml += `
+                        <div class="space-y-8 mt-10">
+                            <h3 class="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] border-b border-slate-100 dark:border-slate-800 pb-3">観測所別の詳細な現況と見込み</h3>
+                    `;
+
+                    stationNames.forEach(stName => {
+                        const data = stationsData[stName];
+                        const criteria = data.criteria || {};
+                        const timeSeries = data.timeSeries || [];
+                        const inundation = inundationRegions[stName] || "情報なし";
+
+                        // 現在の現況水位の取得
+                        const currentItem = timeSeries.find(t => t.timeName === '現況') || timeSeries[0];
+                        const currentVal = currentItem ? parseFloat(currentItem.value) : null;
+                        const currentLvl = currentItem ? currentItem.level : null;
+
+                        // 基準しきい値
+                        const l1 = criteria['レベル１水防団待機水位'] || criteria['レベル1水防団待機水位'];
+                        const l2 = criteria['レベル２氾濫注意水位'] || criteria['レベル2氾濫注意水位'];
+                        const l3 = criteria['レベル３避難判断水位'] || criteria['レベル3避難判断水位'];
+                        const l4 = criteria['レベル４氾濫危険水位'] || criteria['レベル4氾濫危険水位'];
+                        const lMax = criteria['レベル４計画高水位等'] || criteria['レベル4計画高水位等'];
+
+                        // 水位に応じたカラー決定（バッジ用）
+                        let levelColor = "bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300";
+                        if (currentLvl === "1") levelColor = "bg-blue-500 text-white";
+                        if (currentLvl === "2") levelColor = "bg-yellow-500 text-slate-950";
+                        if (currentLvl === "3") levelColor = "bg-red-500 text-white";
+                        if (currentLvl === "4" || currentLvl === "5") levelColor = "bg-purple-600 text-white";
+
+                        // インジケーター用の現況比率計算
+                        let progressPercent = 0;
+                        if (currentVal && lMax) {
+                            progressPercent = Math.min(100, Math.max(5, (currentVal / lMax) * 100));
+                        }
+
+                        structuredDetailsHtml += `
+                            <div class="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-5 md:p-8 border border-slate-100/80 dark:border-slate-900 space-y-6">
+                                <header class="flex items-center justify-between flex-wrap gap-4">
+                                    <div class="space-y-1">
+                                        <div class="flex items-center gap-3">
+                                            <h4 class="text-lg md:text-xl font-bold text-slate-800 dark:text-slate-100">${stName} 観測所</h4>
+                                            ${currentLvl ? `<span class="px-2.5 py-0.5 rounded text-[10px] font-black ${levelColor}">警戒レベル ${currentLvl}相当</span>` : ''}
+                                        </div>
+                                        <p class="text-[10px] text-slate-400 dark:text-slate-500">${data.chargeSection || ''}</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">現況の水位</p>
+                                        <p class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 tabular-nums">${currentVal !== null ? `${currentVal.toFixed(2)} <span class="text-sm">m</span>` : '欠測'}</p>
+                                    </div>
+                                </header>
+
+                                <!-- 水位状況インジケーター（簡易ビジュアルバー） -->
+                                <div class="space-y-2 pt-2">
+                                    <div class="flex items-center justify-between text-[9px] font-bold text-slate-400">
+                                        <span>危険度メーター</span>
+                                        <span>計画高水位: ${lMax ? `${lMax.toFixed(2)}m` : 'データなし'}</span>
+                                    </div>
+                                    <div class="relative w-full h-4 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <!-- 現況水位のバー -->
+                                        <div class="h-full rounded-full transition-all duration-500 ${currentLvl === '4' ? 'bg-purple-600' : currentLvl === '3' ? 'bg-red-500' : currentLvl === '2' ? 'bg-yellow-500' : 'bg-blue-500'}" style="width: ${progressPercent}%"></div>
+                                        
+                                        <!-- 基準水位ラインのプロット（バー上の縦線しきい値） -->
+                                        ${l1 && lMax ? `<div class="absolute top-0 bottom-0 border-l border-blue-400" style="left: ${(l1/lMax)*100}%" title="待機水位: ${l1}m"></div>` : ''}
+                                        ${l2 && lMax ? `<div class="absolute top-0 bottom-0 border-l border-yellow-400" style="left: ${(l2/lMax)*100}%" title="注意水位: ${l2}m"></div>` : ''}
+                                        ${l3 && lMax ? `<div class="absolute top-0 bottom-0 border-l border-red-400" style="left: ${(l3/lMax)*100}%" title="避難判断水位: ${l3}m"></div>` : ''}
+                                        ${l4 && lMax ? `<div class="absolute top-0 bottom-0 border-l border-purple-400" style="left: ${(l4/lMax)*100}%" title="氾濫危険水位: ${l4}m"></div>` : ''}
+                                    </div>
+                                    <!-- 各しきい値の数値ラベル -->
+                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-bold text-slate-500 dark:text-slate-400 pt-1">
+                                        ${l4 ? `<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-purple-500 rounded-sm"></span> 氾濫危険: ${l4.toFixed(2)}m</div>` : ''}
+                                        ${l3 ? `<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-red-500 rounded-sm"></span> 避難判断: ${l3.toFixed(2)}m</div>` : ''}
+                                        ${l2 ? `<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-yellow-500 rounded-sm"></span> 氾濫注意: ${l2.toFixed(2)}m</div>` : ''}
+                                        ${l1 ? `<div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-blue-500 rounded-sm"></span> 待機水位: ${l1.toFixed(2)}m</div>` : ''}
+                                    </div>
+                                </div>
+
+                                <!-- 浸水想定地区 -->
+                                <div class="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800/80 space-y-1">
+                                    <div class="flex items-center gap-1.5 text-slate-400 dark:text-slate-500 text-[10px] font-bold tracking-wider">
+                                        <i data-lucide="map-pin" class="w-3.5 h-3.5 text-red-500"></i>
+                                        <span>氾濫による浸水想定地区</span>
+                                    </div>
+                                    <p class="text-xs md:text-sm font-bold text-slate-700 dark:text-slate-300">${inundation}</p>
+                                </div>
+
+                                <!-- 時系列予測推移テーブル -->
+                                ${timeSeries.length > 0 ? `
+                                    <div class="space-y-2">
+                                        <p class="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">予測水位・警戒レベル推移</p>
+                                        <div class="overflow-x-auto custom-scrollbar border border-slate-100 dark:border-slate-800 rounded-xl">
+                                            <table class="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-[11px]">
+                                                <thead class="bg-slate-100/50 dark:bg-slate-900/50 font-bold text-slate-500 dark:text-slate-400 text-left">
+                                                    <tr>
+                                                        <th class="px-4 py-2.5 whitespace-nowrap">予測時刻</th>
+                                                        <th class="px-4 py-2.5 whitespace-nowrap">予想水位</th>
+                                                        <th class="px-4 py-2.5 whitespace-nowrap">警戒レベル</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody class="divide-y divide-slate-100 dark:divide-slate-800 text-slate-600 dark:text-slate-300 tabular-nums">
+                                                    ${timeSeries.map(tsItem => {
+                                                        const isNow = tsItem.timeName === '現況';
+                                                        let levelBadge = '';
+                                                        if (tsItem.level) {
+                                                            let lvlColor = "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+                                                            if (tsItem.level === "1") lvlColor = "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-400";
+                                                            if (tsItem.level === "2") lvlColor = "bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-400";
+                                                            if (tsItem.level === "3") lvlColor = "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400";
+                                                            if (tsItem.level === "4") lvlColor = "bg-purple-100 text-purple-800 dark:bg-purple-950/40 dark:text-purple-400";
+                                                            levelBadge = `<span class="px-1.5 py-0.5 rounded text-[9px] font-black ${lvlColor}">レベル ${tsItem.level}相当</span>`;
+                                                        }
+                                                        
+                                                        return `
+                                                            <tr class="${isNow ? 'bg-blue-50/30 dark:bg-blue-950/10 font-bold text-slate-900 dark:text-white' : ''}">
+                                                                <td class="px-4 py-2.5 whitespace-nowrap">${tsItem.timeName} ${isNow ? '（発表）' : ''}</td>
+                                                                <td class="px-4 py-2.5 whitespace-nowrap">${tsItem.value !== '欠測' && !isNaN(parseFloat(tsItem.value)) ? `${parseFloat(tsItem.value).toFixed(2)} m` : tsItem.value}</td>
+                                                                <td class="px-4 py-2.5 whitespace-nowrap">${levelBadge || '-'}</td>
+                                                            </tr>
+                                                        `;
+                                                    }).join('')}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    });
+                    structuredDetailsHtml += `</div>`;
+                }
+
+                // 流域平均雨量ビューの構築
+                if (rainInfos.length > 0) {
+                    structuredDetailsHtml += `
+                        <div class="space-y-6 mt-10">
+                            <h3 class="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] border-b border-slate-100 dark:border-slate-800 pb-3">流域平均雨量</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    `;
+                    rainInfos.forEach(rain => {
+                        structuredDetailsHtml += `
+                            <div class="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-5 border border-slate-100/80 dark:border-slate-900 space-y-4">
+                                <h4 class="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                                    <i data-lucide="cloud-rain" class="w-4 h-4 text-blue-500"></i>
+                                    <span>${rain.area}</span>
+                                </h4>
+                                <div class="divide-y divide-slate-100 dark:divide-slate-800">
+                                    ${rain.data.map(d => `
+                                        <div class="flex items-center justify-between py-2 text-xs">
+                                            <span class="text-slate-500 dark:text-slate-400 font-medium">${d.title}</span>
+                                            <span class="font-black text-slate-800 dark:text-slate-200 tabular-nums">${d.value} <span class="text-[10px] text-slate-400">${d.unit}</span></span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    structuredDetailsHtml += `</div></div>`;
+                }
+
+                const isFlood = item.code.startsWith('VPCC');
+                const badgeText = isFlood ? "洪水予報" : "土砂災害警戒";
+                const badgeClass = isFlood 
+                    ? "bg-red-500 text-white" 
+                    : "bg-purple-500 text-white";
+
+                container.innerHTML = `
+                    <div class="fade-in space-y-10 w-full">
+                        <header class="space-y-4 pb-8 text-left border-b border-slate-100 dark:border-slate-800 w-full">
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 ${badgeClass} font-black rounded text-[9px] tracking-widest uppercase">${badgeText}</span>
+                            </div>
+                            <h2 class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 leading-tight">${item.displayTitle}</h2>
+                            <div class="flex items-center gap-3 text-xs md:text-sm font-bold text-slate-400 dark:text-slate-500">
+                                <span class="flex items-center gap-1"><i data-lucide="building" class="w-4 h-4"></i> ${item.author}</span>
+                                <span>/</span>
+                                <span>${formatToReiwa(item.updated)} 発表</span>
+                            </div>
+                        </header>
+                        ${headline ? `<div class="p-6 md:p-8 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100/50 dark:border-slate-800 shadow-sm"><p class="text-slate-700 dark:text-slate-200 font-bold leading-relaxed whitespace-pre-wrap text-sm md:text-base">${headline}</p></div>` : ''}
+                        
+                        <!-- 動的構造化ビュー -->
+                        ${structuredDetailsHtml}
+
+                        ${bodyText ? `<article class="text-left weather-text text-slate-600 dark:text-slate-300 text-base md:text-lg whitespace-pre-wrap mt-8">${bodyText}</article>` : ''}
+                    </div>`;
+                lucide.createIcons();
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = `<p class="text-center py-20 text-slate-400 dark:text-slate-500 text-sm font-bold">読み込みに失敗しました。</p>`;
+            }
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        function closeDetail() {
+            const area = document.getElementById('contentArea');
+            area.classList.add('opacity-0', 'translate-y-4');
+            setTimeout(() => { 
+                area.classList.add('hidden'); 
+                document.body.style.overflow = 'auto'; 
+            }, 200);
+        }
+
+        // システムダークモード対応
+        function initDarkMode() {
+            if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        }
+
+        // キーボードショートカット
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.key === 'Escape') {
+                const detailArea = document.getElementById('contentArea');
+                if (!detailArea.classList.contains('hidden')) {
+                    closeDetail();
+                }
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EWC 気象情報システム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+        }
+
+        .weather-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .weather-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* スケルトンローディング */
+        .skeleton {
+            background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ヘッダーのタブ風デザイン */
+        .header-tab {
+            background: white;
+            border-radius: 0 0 24px 24px;
+            box-shadow: 0 4px 15px -3px rgba(0, 0, 0, 0.05);
+            border: 1px solid #f1f5f9;
+            border-top: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Header (White Tab Style) -->
+    <header class="sticky top-0 z-50 px-4">
+        <div class="container mx-auto max-w-6xl">
+            <div class="header-tab flex items-center justify-between px-6 py-4 md:py-5">
+                <div class="flex flex-col md:flex-row md:items-baseline md:space-x-4">
+                    <h1 class="text-lg md:text-xl font-black tracking-tighter text-slate-800">現在の天気</h1>
+                    <div class="flex items-center text-[10px] md:text-xs text-slate-400 font-bold">
+                        <span class="mr-1 uppercase tracking-wider">Last Update:</span>
+                        <span id="last-update-header">--:--:--</span>
+                    </div>
+                </div>
+                <button onclick="loadWeatherData()" class="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-full transition-all active:scale-90" title="再読み込み">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+        
+        <!-- Weather Slide (Image only) -->
+        <section class="mb-8">
+            <div class="bg-white rounded-[32px] overflow-hidden shadow-sm border border-slate-100">
+                <div class="aspect-video w-full bg-slate-50 flex items-center justify-center">
+                    <img src="https://docs.google.com/presentation/d/1Q1wSDT6pks_ahjr94z6ELiafHXYmBEze5L33GvHVtNI/export/png?id=1Q1wSDT6pks_ahjr94z6ELiafHXYmBEze5L33GvHVtNI&pageid=p" 
+                         alt="Weather Slide" 
+                         class="w-full h-full object-contain"
+                         onerror="this.parentElement.innerHTML='<div class=\'text-slate-300 font-bold\'>画像を読み込めませんでした</div>'">
+                </div>
+            </div>
+        </section>
+
+        <!-- Search Bar -->
+        <div class="bg-white rounded-3xl p-3 mb-8 shadow-sm border border-slate-100 max-w-2xl mx-auto">
+            <div class="relative w-full">
+                <i class="fas fa-search absolute left-5 top-1/2 -translate-y-1/2 text-slate-300"></i>
+                <input type="text" id="search-input" oninput="filterStations()" placeholder="地点を検索..." 
+                       class="w-full pl-12 pr-6 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-100 font-bold text-sm transition-all outline-none">
+            </div>
+        </div>
+
+        <!-- Weather Grid -->
+        <div id="weather-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            <!-- Loading state -->
+            <div class="skeleton h-44 rounded-[32px]"></div>
+            <div class="skeleton h-44 rounded-[32px]"></div>
+            <div class="skeleton h-44 rounded-[32px]"></div>
+            <div class="skeleton h-44 rounded-[32px]"></div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-20 py-12 bg-white border-t border-slate-100 text-slate-400 text-center">
+        <div class="container mx-auto px-4">
+            <p class="text-[10px] font-black uppercase tracking-[0.2em] mb-4 opacity-50">任意団体 EWC</p>
+            <p class="text-[10px] font-bold">データ元: OpenWeatherMap (via EWC Spreadsheet)</p>
+            <p class="text-[9px] mt-2 opacity-60">&copy; 2026 EWC All Rights Reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        const CSV_URL = "https://docs.google.com/spreadsheets/d/1fuQZnenRrGulVHSmH0l1jp4b_2YJX-zFYQqhJavO41c/export?format=csv&gid=0"; 
+
+        let allWeatherData = [];
+
+        function getWeatherIcon(desc) {
+            if (!desc) return { icon: 'fa-question text-slate-300', bg: 'bg-slate-50' };
+            
+            const normalizedDesc = desc.replace('適度な雨', '雨');
+
+            if (normalizedDesc.includes('晴')) return { icon: 'fa-sun text-orange-500', bg: 'bg-orange-50' };
+            if (normalizedDesc.includes('雪')) return { icon: 'fa-snowflake text-slate-400', bg: 'bg-slate-50' };
+            if (normalizedDesc.includes('雨')) {
+                if (normalizedDesc.includes('強い')) return { icon: 'fa-cloud-showers-heavy text-blue-700', bg: 'bg-blue-50' };
+                if (normalizedDesc.includes('小雨')) return { icon: 'fa-cloud-rain text-blue-400', bg: 'bg-blue-50' };
+                return { icon: 'fa-cloud-showers-heavy text-blue-500', bg: 'bg-blue-50' };
+            }
+            if (normalizedDesc.includes('厚い雲')) return { icon: 'fa-cloud text-slate-600', bg: 'bg-slate-100' };
+            if (normalizedDesc.includes('曇')) return { icon: 'fa-cloud text-slate-500', bg: 'bg-slate-100' };
+            if (normalizedDesc.includes('雲')) return { icon: 'fa-cloud text-slate-400', bg: 'bg-slate-50' };
+            return { icon: 'fa-cloud-sun text-blue-400', bg: 'bg-blue-50' };
+        }
+
+        function parseCSV(text) {
+            const rows = [];
+            let currentRow = [];
+            let currentCell = "";
+            let inQuotes = false;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const nextChar = text[i + 1];
+                if (char === '"' && inQuotes && nextChar === '"') { currentCell += '"'; i++; }
+                else if (char === '"') { inQuotes = !inQuotes; }
+                else if (char === ',' && !inQuotes) { currentRow.push(currentCell.trim()); currentCell = ""; }
+                else if ((char === '\n' || char === '\r') && !inQuotes) {
+                    if (char === '\r' && nextChar === '\n') i++;
+                    currentRow.push(currentCell.trim());
+                    if (currentRow.length > 0) rows.push(currentRow);
+                    currentRow = []; currentCell = "";
+                } else { currentCell += char; }
+            }
+            if (currentRow.length > 0) { currentRow.push(currentCell.trim()); rows.push(currentRow); }
+            return rows;
+        }
+
+        async function loadWeatherData() {
+            const grid = document.getElementById('weather-grid');
+            try {
+                const response = await fetch(CSV_URL);
+                const text = await response.text();
+                const rows = parseCSV(text);
+                
+                const dataRows = rows.slice(1);
+                allWeatherData = dataRows.map(row => ({
+                    station: row[0],
+                    weather: row[1],
+                    temp: row[2],
+                    max: row[3],
+                    min: row[4],
+                    humidity: row[5],
+                    updated: row[6]
+                })).filter(item => item.station);
+
+                if (allWeatherData.length > 0) {
+                    const updateTime = allWeatherData[0].updated;
+                    document.getElementById('last-update-header').innerText = updateTime || "--:--:--";
+                }
+
+                renderGrid(allWeatherData);
+            } catch (error) {
+                grid.innerHTML = `<div class="col-span-full py-20 text-center text-red-500 font-bold">データの取得に失敗しました</div>`;
+            }
+        }
+
+        function renderGrid(data) {
+            const grid = document.getElementById('weather-grid');
+            if (data.length === 0) {
+                grid.innerHTML = '<p class="col-span-full text-center py-10 font-bold text-slate-300">表示できるデータがありません</p>';
+                return;
+            }
+            
+            grid.innerHTML = data.map(item => {
+                const style = getWeatherIcon(item.weather);
+                const currentTemp = parseFloat(item.temp);
+                const displayTemp = isNaN(currentTemp) ? "--" : currentTemp.toFixed(1);
+
+                return `
+                    <div class="weather-card bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm flex flex-col justify-between">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="font-black text-slate-800 text-lg tracking-tight">${item.station}</h3>
+                                <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">${item.weather || '--'}</p>
+                            </div>
+                            <div class="${style.bg} w-12 h-12 rounded-2xl flex items-center justify-center transition-colors">
+                                <i class="fas ${style.icon} text-2xl"></i>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-end justify-between">
+                            <div class="flex flex-col">
+                                <span class="text-4xl font-black text-slate-800">${displayTemp}<span class="text-lg ml-0.5 font-bold text-slate-400">°</span></span>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Humidity</div>
+                                <div class="text-sm font-black text-slate-600">
+                                    ${item.humidity || '--'}<span class="text-[10px] ml-0.5">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterStations() {
+            const term = document.getElementById('search-input').value.toLowerCase();
+            const filtered = allWeatherData.filter(d => d.station.toLowerCase().includes(term));
+            renderGrid(filtered);
+        }
+
+        window.onload = loadWeatherData;
+        setInterval(loadWeatherData, 300000);
+    </script>
+</body>
+</html>

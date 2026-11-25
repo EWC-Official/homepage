@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EWC天気予報</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #ffffff;
+            color: #1e293b;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #f1f5f9; border-radius: 10px; }
+
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .weather-text {
+            line-height: 2.1;
+            letter-spacing: 0.01em;
+        }
+
+        .skeleton {
+            background: linear-gradient(90deg, #f1f5f9 25%, #f8fafc 50%, #f1f5f9 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .tab-btn {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .tab-btn.active {
+            background-color: #3b82f6;
+            color: white;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+        }
+
+        .archive-item:hover { background-color: #f8fafc; }
+    </style>
+</head>
+<body class="overflow-y-auto custom-scrollbar">
+
+    <div class="min-h-screen flex flex-col">
+        <!-- ヘッダー -->
+        <header class="border-b border-slate-100 px-6 py-4 sticky top-0 bg-white/90 backdrop-blur-md z-20">
+            <div class="max-w-4xl mx-auto flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <h1 class="text-sm font-black tracking-widest text-slate-800 uppercase">EWC天気予報</h1>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div id="lastUpdate" class="text-[9px] font-bold text-slate-300 uppercase">READY</div>
+                    <button onclick="fetchAllData()" class="p-1.5 hover:bg-slate-50 rounded-full transition-colors text-slate-400 hover:text-blue-600" title="更新">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="flex-1 w-full max-w-4xl mx-auto px-6 py-8 md:py-10 pb-32">
+            
+            <!-- リンク・メニュー -->
+            <div class="flex flex-wrap gap-2 mb-10">
+                <div class="p-1 bg-slate-50 w-fit rounded-xl border border-slate-100 flex items-center">
+                    <span id="forecast-label" class="px-5 py-2.5 text-[11px] font-black rounded-lg bg-white shadow-sm text-blue-600 border border-slate-100">
+                        本日の天気予報
+                    </span>
+                </div>
+                <!-- target を _blank に変更し、セキュリティのため rel="noopener" を追加 -->
+                <a href="https://sites.google.com/view/ewc-official-1/%E5%BA%9C%E7%9C%8C%E9%80%B1%E9%96%93%E5%A4%A9%E6%B0%97%E4%BA%88%E5%A0%B1" 
+                   target="_blank"
+                   rel="noopener"
+                   class="flex items-center gap-2 px-5 py-3 text-[11px] font-black rounded-xl text-slate-500 hover:text-slate-800 bg-slate-50 border border-slate-100 hover:bg-slate-100 transition-all">
+                    <span>府県週間天気予報</span>
+                    <i data-lucide="external-link" class="w-3 h-3"></i>
+                </a>
+            </div>
+
+            <div id="forecastContent" class="fade-in space-y-12">
+                
+                <!-- 全体読み込み状態 -->
+                <div id="loadingState" class="space-y-12 max-w-2xl mx-auto">
+                    <div class="space-y-4">
+                        <div class="h-8 w-3/4 skeleton rounded-lg"></div>
+                    </div>
+                    <div class="aspect-video w-full skeleton rounded-[32px]"></div>
+                    <div class="space-y-3">
+                        <div class="h-3 w-1/6 skeleton rounded"></div>
+                        <div class="h-24 w-full skeleton rounded-xl"></div>
+                    </div>
+                </div>
+
+                <div id="realContent" class="hidden">
+                    
+                    <!-- 本日・明日の概況 -->
+                    <div id="view-snapshot" class="space-y-12 fade-in">
+                        <header class="flex justify-between items-end pb-8 border-b border-slate-50 max-w-2xl mx-auto">
+                            <div class="space-y-2">
+                                <span id="archiveBadge" class="hidden px-2 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-bold rounded">過去の予報</span>
+                                <h2 id="mainHeading" class="text-2xl md:text-3xl font-black text-slate-900 leading-tight">天気予報</h2>
+                            </div>
+                            <button id="backToLatestBtn" onclick="showLatest()" class="hidden text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-full transition-all">
+                                最新の情報に戻る
+                            </button>
+                        </header>
+
+                        <div id="visualArea" class="max-w-2xl mx-auto"></div>
+
+                        <div class="space-y-4 max-w-2xl mx-auto">
+                            <h5 class="text-[10px] font-black text-slate-300 uppercase tracking-widest border-b border-slate-50 pb-2">気象概況</h5>
+                            <article class="text-left">
+                                <div id="overviewText" class="weather-text text-slate-700 text-base md:text-lg font-bold whitespace-pre-wrap"></div>
+                            </article>
+                        </div>
+
+                        <!-- アーカイブエリア（月別タブ） -->
+                        <section class="pt-8 space-y-6 max-w-2xl mx-auto">
+                            <h4 class="text-xs font-black text-slate-400 text-center tracking-widest uppercase"></h4>
+                            
+                            <!-- 月選択タブ -->
+                            <div id="monthTabs" class="flex flex-wrap justify-center gap-2 p-1"></div>
+                            
+                            <!-- リスト表示エリア -->
+                            <div id="archiveList" class="grid gap-2 min-h-[100px]"></div>
+                        </section>
+                    </div>
+
+                    <footer class="pt-10 pb-10 text-center">
+                        <div class="w-8 h-px bg-slate-100 mx-auto"></div>
+                    </footer>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const SPREADSHEET_ID = '1OVL2Tyb1ahtDDtt74Zce_85LLAQAf0UIMiI70Y6VbDY';
+        const LATEST_GID = '0';
+        const ARCHIVE_GID = '627352808';
+        const SLIDE_ID = '1OXSh9P5-kde2BvRUyKjvoc4JCyttedxyRsT1rywixx4';
+        const SLIDE_BASE_URL = `https://docs.google.com/presentation/d/${SLIDE_ID}/export/png?id=${SLIDE_ID}`;
+
+        let latestData = null;
+        let archives = [];
+        let groupedArchives = {}; // { "2026年05月": [...] }
+        let selectedMonth = null;
+
+        lucide.createIcons();
+
+        function parseCSV(text) {
+            const rows = [];
+            let currentRow = [];
+            let currentCell = "";
+            let inQuotes = false;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const nextChar = text[i + 1];
+                if (char === '"' && inQuotes && nextChar === '"') { currentCell += '"'; i++; }
+                else if (char === '"') { inQuotes = !inQuotes; }
+                else if (char === ',' && !inQuotes) { currentRow.push(currentCell.trim()); currentCell = ""; }
+                else if ((char === '\n' || char === '\r') && !inQuotes) {
+                    if (char === '\r' && nextChar === '\n') i++;
+                    currentRow.push(currentCell.trim());
+                    rows.push(currentRow);
+                    currentRow = [];
+                    currentCell = "";
+                } else { currentCell += char; }
+            }
+            if (currentRow.length > 0 || currentCell !== "") { currentRow.push(currentCell.trim()); rows.push(currentRow); }
+            return rows;
+        }
+
+        function formatDriveUrl(url) {
+            if (!url) return "";
+            const driveMatch = url.match(/(?:\/d\/|id=)([a-zA-Z0-9_-]{25,})/);
+            if (driveMatch && driveMatch[1]) return `https://lh3.googleusercontent.com/d/${driveMatch[1]}`;
+            return url;
+        }
+
+        async function fetchAllData() {
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('realContent').classList.add('hidden');
+
+            try {
+                const latestRes = await fetch(`https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=csv&gid=${LATEST_GID}`);
+                const latestText = await latestRes.text();
+                const latestRows = parseCSV(latestText);
+
+                const now = new Date();
+                const hour = now.getHours();
+                const isNight = (hour < 7 || hour >= 19);
+                
+                latestData = {
+                    isNight: isNight,
+                    overview: isNight ? (latestRows[0][1] || "データなし") : (latestRows[0][0] || "データなし"),
+                    timestamp: now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+                };
+
+                const forecastLabel = document.getElementById('forecast-label');
+                forecastLabel.innerText = isNight ? "明日の天気予報" : "本日の天気予報";
+
+                const archiveRes = await fetch(`https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=csv&gid=${ARCHIVE_GID}`);
+                const archiveText = await archiveRes.text();
+                const archiveRows = parseCSV(archiveText);
+
+                archives = archiveRows.filter(row => row.length >= 3).map((row, idx) => ({
+                    id: idx,
+                    date: row[0], // 配信日時 (2026/05/06 19:00)
+                    imgUrl: formatDriveUrl(row[1]),
+                    content: row[2]
+                }));
+
+                // グループ化
+                groupArchivesByMonth();
+
+                showLatest();
+                renderTabs();
+                renderArchiveList();
+                
+                document.getElementById('lastUpdate').innerText = `UPDATED: ${latestData.timestamp}`;
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('realContent').classList.remove('hidden');
+
+            } catch (error) {
+                console.error("Fetch error:", error);
+                document.getElementById('loadingState').innerHTML = `<p class="text-xs font-bold text-red-500 text-center">取得エラーが発生しました。<br>再読み込みをお試しください。</p>`;
+            } finally {
+                lucide.createIcons();
+            }
+        }
+
+        function groupArchivesByMonth() {
+            groupedArchives = {};
+            archives.forEach(item => {
+                const match = item.date.match(/(\d{4})\/(\d{2})/);
+                if (match) {
+                    const monthKey = `${match[1]}年${match[2]}月`;
+                    if (!groupedArchives[monthKey]) groupedArchives[monthKey] = [];
+                    groupedArchives[monthKey].push(item);
+                }
+            });
+
+            const months = Object.keys(groupedArchives).sort((a, b) => b.localeCompare(a));
+            if (months.length > 0) selectedMonth = months[0];
+        }
+
+        function renderTabs() {
+            const tabsContainer = document.getElementById('monthTabs');
+            tabsContainer.innerHTML = '';
+            
+            const months = Object.keys(groupedArchives).sort((a, b) => b.localeCompare(a));
+            months.forEach(month => {
+                const btn = document.createElement('button');
+                btn.className = `tab-btn px-4 py-2 text-[10px] font-black rounded-xl border border-slate-100 transition-all ${selectedMonth === month ? 'active' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`;
+                btn.innerText = month;
+                btn.onclick = () => {
+                    selectedMonth = month;
+                    renderTabs();
+                    renderArchiveList();
+                };
+                tabsContainer.appendChild(btn);
+            });
+        }
+
+        function renderArchiveList() {
+            const listContainer = document.getElementById('archiveList');
+            listContainer.innerHTML = '';
+            
+            if (!selectedMonth || !groupedArchives[selectedMonth]) return;
+
+            groupedArchives[selectedMonth].forEach((item) => {
+                const titleMatch = item.content.match(/\*\*【.*?】\*\*.*?\d+日/);
+                const title = titleMatch ? titleMatch[0].replace(/\*\*/g, '') : "アーカイブ";
+                
+                const button = document.createElement('button');
+                button.className = "archive-item w-full text-left p-4 rounded-2xl border border-slate-50 hover:border-blue-100 transition-all group bg-slate-50/30 fade-in";
+                button.onclick = () => showArchive(item);
+                button.innerHTML = `
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-1">
+                        <span class="text-sm font-bold text-slate-700 group-hover:text-blue-600 transition-colors">${title}</span>
+                        <span class="text-[10px] font-bold text-slate-400 font-mono">${item.date}</span>
+                    </div>
+                `;
+                listContainer.appendChild(button);
+            });
+        }
+
+        function showLatest() {
+            if (!latestData) return;
+            const titlePrefix = latestData.isNight ? "あすの" : "本日の";
+            const slidePageId = latestData.isNight ? "g3d53797f32a_0_0" : "p";
+            updateMainUI(`${titlePrefix}天気予報`, `${SLIDE_BASE_URL}&pageid=${slidePageId}`, latestData.overview, false);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function showArchive(item) {
+            const titleMatch = item.content.match(/【.*?】/);
+            updateMainUI(titleMatch ? titleMatch[0] : "アーカイブ", item.imgUrl, item.content, true);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function updateMainUI(title, imgUrl, text, isArchive) {
+            const visualArea = document.getElementById('visualArea');
+            const overviewText = document.getElementById('overviewText');
+            const mainHeading = document.getElementById('mainHeading');
+            const backBtn = document.getElementById('backToLatestBtn');
+            const badge = document.getElementById('archiveBadge');
+
+            mainHeading.innerText = title;
+            let processedText = text || "";
+            if (processedText && !processedText.includes("引用：気象庁")) processedText += "\n\n引用：気象庁";
+            overviewText.innerHTML = processedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+            if (isArchive) {
+                backBtn.classList.remove('hidden');
+                badge.classList.remove('hidden');
+            } else {
+                backBtn.classList.add('hidden');
+                badge.classList.add('hidden');
+            }
+
+            visualArea.innerHTML = `
+                <div class="bg-slate-50 rounded-[32px] min-h-[220px] flex items-center justify-center shadow-inner overflow-hidden border border-slate-50 fade-in">
+                    <img src="${imgUrl}" class="w-full h-auto" onerror="this.parentElement.innerHTML='<div class=\'text-slate-300 text-xs font-bold\'>IMAGE READY</div>'">
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        window.onload = fetchAllData;
+    </script>
+</body>
+</html>

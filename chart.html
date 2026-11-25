@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>EWC 気象情報</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #leafletMap {
+            width: 100% !important;
+            height: 100% !important;
+            background-color: #f1f5f9; 
+        }
+
+        .pressure-label {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .label-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            line-height: 0.8;
+            transform: translateY(-40px); 
+        }
+
+        .label-type {
+            font-size: 40px;
+            font-weight: 900;
+            text-shadow: 0 0 10px rgba(255,255,255,1), 2px 2px 0px rgba(255,255,255,1);
+        }
+
+        .label-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #334155;
+            margin-top: 2px;
+            background: rgba(255,255,255,0.9);
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+            white-space: nowrap;
+        }
+
+        .label-movement {
+            font-size: 10px;
+            font-weight: 900;
+            color: #475569;
+            margin-top: 2px;
+            background: rgba(255,255,255,0.8);
+            padding: 1px 4px;
+            border-radius: 2px;
+            border: 1px solid #cbd5e1;
+            white-space: nowrap;
+        }
+
+        .entry-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+        }
+
+        .entry-card:active {
+            transform: scale(0.98);
+            background-color: #f1f5f9;
+        }
+
+        .front-symbol-icon { overflow: visible !important; pointer-events: none; }
+        .front-symbol-wrapper { position: absolute; top: 0; left: 0; transform-origin: center top; }
+
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="overflow-y-auto">
+
+    <div class="min-h-screen flex flex-col">
+        <header class="h-14 border-b border-slate-200 px-4 sticky top-0 bg-white/90 backdrop-blur-md z-50 flex items-center justify-between">
+            <h1 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                <i data-lucide="cloud-sun" class="w-5 h-5 text-blue-500"></i>
+                EWC 気象情報
+            </h1>
+            <div class="flex items-center gap-3">
+                <span id="lastUpdate" class="text-[10px] font-medium text-slate-400">更新中...</span>
+                <button onclick="fetchFeeds()" class="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors">
+                    <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </header>
+
+        <main class="flex-1 w-full max-w-2xl mx-auto p-4 pb-20">
+            <div id="entryList" class="space-y-3">
+                <div class="py-20 text-center">
+                    <div class="inline-block h-6 w-6 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+                </div>
+            </div>
+        </main>
+
+        <section id="contentArea" class="fixed inset-0 z-[100] flex flex-col bg-white hidden opacity-0 translate-y-4 transition-all duration-300">
+            <nav class="h-14 border-b border-slate-200 px-4 flex items-center justify-between bg-white">
+                <button onclick="closeDetail()" class="flex items-center gap-1 text-slate-600 font-bold text-sm">
+                    <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                    戻る
+                </button>
+                <div id="navTitle" class="text-xs font-bold text-slate-800 truncate px-4 text-center flex-1"></div>
+                <div class="w-10"></div>
+            </nav>
+
+            <div class="flex-1 relative">
+                <div id="visualDisplay" class="w-full h-full"></div>
+                
+                <div id="textOverlay" class="absolute bottom-4 left-4 right-4 z-[1000] hidden">
+                    <div class="bg-white/95 backdrop-blur shadow-xl rounded-2xl border border-slate-200 p-4 max-h-[30vh] overflow-y-auto hide-scrollbar">
+                        <div id="textContent" class="text-slate-700 text-sm leading-relaxed space-y-2"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const FEEDS = [
+            "https://www.data.jma.go.jp/developer/xml/feed/extra.xml",
+            "https://www.data.jma.go.jp/developer/xml/feed/regular.xml"
+        ];
+
+        let activeMap = null;
+
+        function init() { lucide.createIcons(); fetchFeeds(); }
+
+        function getSortPriority(title) {
+            if (title.includes("地上実況図")) return 10;
+            if (title.includes("アジア太平洋地上実況図")) return 20;
+            if (title.includes("地上２４時間予想図")) return 30;
+            if (title.includes("海上悪天２４時間予想図")) return 40;
+            if (title.includes("地上４８時間予想図")) return 50;
+            if (title.includes("海上悪天４８時間予想図")) return 60;
+            return 99;
+        }
+
+        async function fetchFeeds() {
+            const list = document.getElementById('entryList');
+            try {
+                let charts = [];
+                for (const url of FEEDS) {
+                    const response = await fetch(url);
+                    const text = await response.text();
+                    const xml = new DOMParser().parseFromString(text, "text/xml");
+                    const entries = Array.from(xml.getElementsByTagName('entry'));
+
+                    for (let entry of entries) {
+                        const title = entry.getElementsByTagName('title')[0]?.textContent || "";
+                        if (title.includes("実況図") || title.includes("予想図")) {
+                            charts.push({
+                                title,
+                                updated: new Date(entry.getElementsByTagName('updated')[0]?.textContent),
+                                link: entry.querySelector('link[type="application/xml"]')?.getAttribute('href')
+                            });
+                        }
+                    }
+                }
+
+                charts.sort((a, b) => {
+                    const priA = getSortPriority(a.title);
+                    const priB = getSortPriority(b.title);
+                    if (priA !== priB) return priA - priB;
+                    return b.updated - a.updated;
+                });
+
+                list.innerHTML = "";
+                const seen = new Set();
+                charts.forEach(item => {
+                    if (seen.has(item.title)) return;
+                    seen.add(item.title);
+
+                    const card = document.createElement('div');
+                    card.className = "entry-card p-4 flex items-center justify-between cursor-pointer border border-transparent hover:border-blue-200";
+                    card.innerHTML = `
+                        <div class="min-w-0">
+                            <h3 class="text-sm font-bold text-slate-800 truncate">${item.title}</h3>
+                            <p class="text-[10px] text-slate-400 mt-1">${item.updated.toLocaleString('ja-JP')}</p>
+                        </div>
+                        <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300"></i>
+                    `;
+                    card.onclick = () => fetchDetail(item);
+                    list.appendChild(card);
+                });
+
+                document.getElementById('lastUpdate').innerText = new Date().toLocaleTimeString('ja-JP') + " 更新";
+                lucide.createIcons();
+            } catch (e) {
+                list.innerHTML = `<p class="text-center text-xs text-slate-400 py-20">データの取得に失敗しました</p>`;
+            }
+        }
+
+        async function fetchDetail(item) {
+            const area = document.getElementById('contentArea');
+            area.classList.remove('hidden');
+            setTimeout(() => area.classList.remove('opacity-0', 'translate-y-4'), 10);
+            document.body.style.overflow = 'hidden';
+            document.getElementById('navTitle').innerText = item.title;
+
+            try {
+                const response = await fetch(item.link);
+                const xmlText = await response.text();
+                const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+
+                renderMap(doc);
+                
+                const headline = doc.querySelector('Headline Text')?.textContent || "";
+                const situation = doc.querySelector('GeneralSituationText, [localName="GeneralSituationText"]')?.textContent || "";
+                
+                if (headline || situation) {
+                    document.getElementById('textOverlay').classList.remove('hidden');
+                    document.getElementById('textContent').innerHTML = `
+                        ${headline ? `<p class="font-bold text-blue-600">${headline}</p>` : ''}
+                        <p>${situation}</p>
+                    `;
+                }
+                lucide.createIcons();
+            } catch (e) { console.error(e); }
+        }
+
+        function renderMap(xmlDoc) {
+            const container = document.getElementById('visualDisplay');
+            container.innerHTML = `<div id="leafletMap"></div>`;
+            
+            const map = L.map('leafletMap', {
+                zoomControl: false, attributionControl: false, worldCopyJump: false
+            });
+            activeMap = map;
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+            const layer = L.layerGroup().addTo(map);
+            const bounds = L.latLngBounds();
+            const centerLon = 150;
+
+            const fixLon = lon => {
+                while (lon < centerLon - 180) lon += 360;
+                while (lon > centerLon + 180) lon -= 360;
+                return lon;
+            };
+
+            const parsePoints = str => {
+                return (str || "").split('/').filter(p => p).map(p => {
+                    const m = p.match(/[+-]?\d+(\.\d+)?/g);
+                    if (!m) return null;
+                    return [parseFloat(m[0]), fixLon(parseFloat(m[1]))];
+                }).filter(x => x);
+            };
+
+            const getPointAtDist = (pts, targetDist) => {
+                let d = 0;
+                for (let i = 0; i < pts.length - 1; i++) {
+                    const segD = Math.sqrt(Math.pow(pts[i+1][0]-pts[i][0], 2) + Math.pow(pts[i+1][1]-pts[i][1], 2));
+                    if (d + segD >= targetDist) {
+                        const ratio = (targetDist - d) / segD;
+                        return {
+                            p: [pts[i][0] + (pts[i+1][0]-pts[i][0]) * ratio, pts[i][1] + (pts[i+1][1]-pts[i][1]) * ratio],
+                            ang: Math.atan2(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]) * 180 / Math.PI
+                        };
+                    }
+                    d += segD;
+                }
+                const lastIdx = pts.length - 2;
+                return {
+                    p: pts[pts.length-1],
+                    ang: Math.atan2(pts[pts.length-1][0]-pts[lastIdx][0], pts[pts.length-1][1]-pts[lastIdx][1]) * 180 / Math.PI
+                };
+            };
+
+            const items = Array.from(xmlDoc.querySelectorAll('Item'));
+            
+            const symW = 20, symH = 16;
+            const sHalfCircle = (c) => `<svg width="${symW}" height="${symH}" viewBox="0 0 28 22" style="overflow:visible"><path d="M0,0 A14,14 0 0,0 28,0 Z" fill="${c}" stroke="${c}" stroke-width="0.5"/></svg>`;
+            const sTriangle = (c) => `<svg width="${symW}" height="${symH}" viewBox="0 0 28 22" style="overflow:visible"><path d="M0,0 L28,0 L14,20 Z" fill="${c}" stroke="${c}" stroke-width="0.5"/></svg>`;
+            const sOccludedPair = (c) => `
+                <svg width="${symW * 2}" height="${symH}" viewBox="0 0 56 22" style="overflow:visible">
+                    <path d="M0,0 L28,0 L14,20 Z" fill="${c}" stroke="${c}" stroke-width="0.5"/>
+                    <path d="M28,0 A14,14 0 0,0 56,0 Z" fill="${c}" stroke="${c}" stroke-width="0.5"/>
+                </svg>
+            `;
+
+            items.forEach(item => {
+                const type = item.querySelector('Property > Type')?.textContent || "";
+                const pts = parsePoints(item.querySelector('Line')?.textContent);
+
+                if (type === '等圧線' && pts.length > 1) {
+                    const press = parseInt(item.querySelector('Pressure')?.textContent || "0");
+                    const isBold = press % 20 === 0;
+                    L.polyline(pts, {
+                        color: isBold ? '#334155' : '#94a3b8',
+                        weight: isBold ? 2 : 1,
+                        dashArray: (press % 4 !== 0) ? '4, 4' : null,
+                        interactive: false
+                    }).addTo(layer);
+                    pts.forEach(p => bounds.extend(p));
+                }
+
+                if (type.includes('前線') && pts.length > 1) {
+                    let color = '#64748b';
+                    if (type.includes('温暖')) color = '#ef4444';
+                    else if (type.includes('寒冷')) color = '#3b82f6';
+                    else if (type.includes('閉塞')) color = '#a855f7';
+                    L.polyline(pts, { color, weight: 4, interactive: false }).addTo(layer);
+                    pts.forEach(p => bounds.extend(p));
+                    const isOccluded = type.includes('閉塞'), isStationary = type.includes('停滞');
+                    let totalLen = 0;
+                    for(let i=0; i<pts.length-1; i++) {
+                        totalLen += Math.sqrt(Math.pow(pts[i+1][0]-pts[i][0], 2) + Math.pow(pts[i+1][1]-pts[i][1], 2));
+                    }
+                    if (totalLen > 0.5) {
+                        const step = isOccluded ? 10.0 : 4.0;
+                        const margin = isOccluded ? 1.5 : 0.5;
+                        let currentDist = margin, symCount = 0;
+                        while (currentDist <= totalLen - margin) {
+                            const info = getPointAtDist(pts, currentDist);
+                            let html = '', rot = 0, currentSymW = symW;
+                            if (type.includes('温暖')) { html = sHalfCircle('#ef4444'); rot = 180 - info.ang; }
+                            else if (type.includes('寒冷')) { html = sTriangle('#3b82f6'); rot = 360 - info.ang; }
+                            else if (isOccluded) { html = sOccludedPair('#a855f7'); rot = 180 - info.ang; currentSymW = symW * 2; }
+                            else if (isStationary) {
+                                if (symCount % 2 === 0) { html = sHalfCircle('#ef4444'); rot = 180 - info.ang; }
+                                else { html = sTriangle('#3b82f6'); rot = 360 - info.ang; }
+                            }
+                            if (html) {
+                                L.marker(info.p, {
+                                    icon: L.divIcon({
+                                        html: `<div class="front-symbol-wrapper" style="transform: rotate(${rot}deg);">${html}</div>`,
+                                        iconSize: [currentSymW, symH],
+                                        iconAnchor: [currentSymW/2, 0],
+                                        className: 'front-symbol-icon'
+                                    }), interactive: false
+                                }).addTo(layer);
+                                symCount++;
+                            }
+                            currentDist += step;
+                        }
+                    }
+                }
+
+                const coord = item.querySelector('Coordinate')?.textContent || "";
+                const m = coord.match(/[+-]?\d+(\.\d+)?/g);
+                if (m) {
+                    const p = [parseFloat(m[0]), fixLon(parseFloat(m[1]))];
+                    const press = item.querySelector('Pressure')?.textContent || "";
+                    const direction = item.querySelector('Property > Direction')?.textContent || "";
+                    const speed = item.querySelector('Property > Speed')?.textContent || "";
+                    const speedUnit = item.querySelector('Property > Speed')?.getAttribute('unit') || "km/h";
+                    const moveText = (direction && direction !== "ほとんど停滞") ? `${direction} ${speed}${speedUnit}` : direction;
+
+                    bounds.extend(p);
+
+                    // 台風の号数抽出
+                    let tyNum = "";
+                    if (type === '台風') {
+                        const name = item.querySelector('Property > Name')?.textContent || "";
+                        const numMatch = name.match(/第(\d+)号/);
+                        tyNum = numMatch ? numMatch[1] : "";
+                    }
+
+                    if (type === '台風' || ['低気圧', '高気圧', '熱帯低気圧'].includes(type)) {
+                        const isLow = type.includes('低気圧') || type === '台風' || type === '熱帯低気圧';
+                        let typeLabel = isLow ? 'L' : 'H';
+                        if (type === '台風') typeLabel = `T${tyNum}`;
+                        else if (type === '熱帯低気圧') typeLabel = 'TD';
+
+                        // 中心×印
+                        L.marker(p, { 
+                            icon: L.divIcon({
+                                html: `<div class="relative w-4 h-4">
+                                         <div class="absolute top-1/2 left-0 w-full h-0.5 bg-slate-800 rotate-45"></div>
+                                         <div class="absolute top-1/2 left-0 w-full h-0.5 bg-slate-800 -rotate-45"></div>
+                                       </div>`,
+                                iconSize: [16, 16], iconAnchor: [8, 8], className: ''
+                            })
+                        }).addTo(layer);
+
+                        // テキストラベル
+                        L.marker(p, { 
+                            icon: L.divIcon({
+                                html: `<div class="label-content" style="color:${isLow?'#ef4444':'#2563eb'}">
+                                         <div class="label-type">${typeLabel}</div>
+                                         <div class="label-value">${press}</div>
+                                         ${moveText ? `<div class="label-movement">${moveText}</div>` : ''}
+                                       </div>`,
+                                iconSize: [100, 100], iconAnchor: [50, 50], className: 'pressure-label'
+                            })
+                        }).addTo(layer);
+                    }
+                }
+            });
+
+            if (bounds.isValid()) {
+                map.fitBounds(bounds, { padding: [20, 20], animate: false });
+            } else {
+                map.setView([35, 140], 4);
+            }
+        }
+
+        function closeDetail() {
+            const o = document.getElementById('contentArea');
+            o.classList.add('opacity-0', 'translate-y-4');
+            setTimeout(() => {
+                o.classList.add('hidden');
+                document.body.style.overflow = 'auto';
+                if(activeMap) activeMap.remove();
+            }, 300);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

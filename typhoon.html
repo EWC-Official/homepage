@@ -1,0 +1,1915 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>EWC台風情報</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #ffffff;
+            color: #1e293b;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #f1f5f9; border-radius: 10px; }
+        
+        .textarea-scrollbar::-webkit-scrollbar { width: 6px; }
+        .textarea-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .textarea-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .category-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background-color: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(4px);
+        }
+
+        .entry-card { transition: all 0.1s ease; }
+        .entry-card:hover { background-color: #f8fafc; }
+
+        .weather-text {
+            line-height: 2.1;
+            letter-spacing: 0.01em;
+        }
+
+        #contentArea {
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        /* 台風・低気圧種別バッジ用 */
+        .badge-typhoon { background-color: #ef4444; color: white; }
+        .badge-td { background-color: #3b82f6; color: white; }
+        .badge-low { background-color: #64748b; color: white; }
+        
+        /* テキスト選択無効化 */
+        .no-select {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+    </style>
+</head>
+<body class="overflow-y-auto">
+
+    <div class="min-h-screen flex flex-col relative">
+        <!-- ヘッダー -->
+        <header class="border-b border-slate-100 px-6 py-4 sticky top-0 bg-white z-20 shadow-sm">
+            <div class="max-w-2xl mx-auto flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="hurricane" class="w-4 h-4 text-blue-600"></i>
+                    <h1 class="text-sm font-black tracking-widest text-slate-800 uppercase">EWC台風情報</h1>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <div id="lastUpdate" class="text-[9px] font-bold text-slate-300"></div>
+                    <button onclick="fetchTyphoonFeed()" class="p-1 hover:bg-slate-50 rounded transition-colors text-slate-300 hover:text-blue-600" title="更新">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- メイン画面：リスト -->
+        <main class="flex-1 w-full max-w-2xl mx-auto px-4 pb-20">
+            <div id="entryList" class="divide-y divide-slate-50 mt-4">
+                <div class="py-20 text-center text-slate-200">
+                    <div class="inline-block h-5 w-5 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+                    <p class="text-xs font-bold mt-4 text-slate-400">気象庁から最新情報を取得中...</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- 詳細画面：オーバーレイ -->
+        <section id="contentArea" class="fixed inset-0 z-50 bg-white overflow-y-auto hidden opacity-0 translate-y-4">
+            <div class="sticky top-0 bg-white/90 backdrop-blur-md px-6 py-4 border-b border-slate-50 flex items-center justify-between z-30">
+                <button onclick="closeDetail()" class="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                    <span class="text-[10px] font-bold tracking-widest uppercase">閉じる</span>
+                </button>
+            </div>
+            
+            <div id="detailView" class="max-w-6xl mx-auto w-full p-4 md:p-8 pb-32">
+                <div id="detailContainer"></div>
+            </div>
+        </section>
+
+        <!-- 生データ表示モーダル -->
+        <div id="rawDataModal" class="fixed inset-0 z-[100] bg-black/50 hidden opacity-0 transition-opacity duration-200 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div class="bg-white rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col shadow-2xl transform scale-95 transition-transform duration-200" id="rawDataModalContent">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="file-code" class="w-4 h-4 text-blue-600"></i>
+                        XML 生データ（全履歴）
+                    </h3>
+                    <button onclick="closeRawDataModal()" class="text-slate-400 hover:text-slate-700 transition-colors">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="flex-1 p-4 overflow-hidden relative">
+                    <textarea id="rawDataContent" class="w-full h-full bg-slate-50 text-slate-700 font-mono text-[10px] sm:text-xs p-4 rounded-xl border border-slate-200 textarea-scrollbar outline-none resize-none" readonly></textarea>
+                </div>
+                <div class="px-6 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end">
+                     <button onclick="closeRawDataModal()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm">閉じる</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- トースト通知 -->
+        <div id="toast" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-800/90 backdrop-blur text-white px-5 py-3 rounded-xl text-xs font-bold opacity-0 transition-opacity duration-300 pointer-events-none z-[1000] shadow-lg flex items-center gap-2">
+            <i data-lucide="check-circle-2" class="w-4 h-4 text-green-400"></i>
+            <span id="toastMsg">コピーしました</span>
+        </div>
+    </div>
+
+    <script>
+        const JMA_FEED_EXTRA = "https://www.data.jma.go.jp/developer/xml/feed/extra.xml";
+        
+        // CORS回避用プロキシサーバーの優先度付きリスト
+        const PROXIES = [
+            "https://corsproxy.io/?",
+            "https://api.codetabs.com/v1/proxy?quest=",
+            "https://api.allorigins.win/raw?url="
+        ];
+
+        // 8方位を角度に変換
+        const DIRECTION_ANGLES = {
+            "北": 0, "北東": 45, "東": 90, "南東": 135,
+            "南": 180, "南西": 225, "西": 270, "北西": 315
+        };
+
+        // 表示設定の管理
+        let viewSettings = {
+            mapView: 'wide',      // 'wide' または 'focus'
+            targetMode: 'all',    // 'all'(進路予想図), '24h'(24時間以内), '1h_only'(1時間後推定のみ)
+            show3h: true          // true(3時間毎表示) または false(非表示)
+        };
+
+        // 地図状態管理用 (Mercator対応)
+        let mapConfig = { minLa: 0, maxLa: 0, minLo: 0, maxLo: 0, mercMinY: 0, mercMaxY: 0, sc: 0, w: 0, h: 0 };
+        let mapState = { scale: 1, offsetX: 0, offsetY: 0, isDragging: false, lastX: 0, lastY: 0, pendingDraw: false };
+        let canvasEventsInitialized = false;
+
+        let worldGeoJson = null;
+        let japanGeoJson = null;
+        
+        let cachedWorldPath = null;
+        let cachedJapanPath = null;
+
+        // 全台風データ保持用
+        let globalTyphoonItems = [];
+        let allTyphoonDataPoints = []; // 地図描画用
+
+        let currentDoc = null;
+        let currentItem = null;
+        let currentDataPoints = []; 
+        let currentRawXml = "";
+        let hasAny3hForecast = false;
+        let currentIsAllMode = false;
+
+        // コピー用のデータ保持用
+        let currentForecastDataList = [];
+        let currentTyphoonName = "";
+
+        /**
+         * 緯度からWeb MercatorのY座標(度数相当のスケール)を計算
+         */
+        function lat2mercY(lat) {
+            const rad = lat * Math.PI / 180;
+            return Math.log(Math.tan(Math.PI / 4 + rad / 2)) * (180 / Math.PI);
+        }
+
+        /**
+         * 地球上の2点間の距離と方位から、目的地の緯度経度を求める（球面三角法）
+         */
+        function getDestPoint(lat, lon, dKm, bearingDeg) {
+            const R = 6371; // 地球の半径 km
+            const lat1 = lat * Math.PI / 180;
+            const lon1 = lon * Math.PI / 180;
+            const brng = bearingDeg * Math.PI / 180;
+            const d = dKm / R;
+
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng));
+            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+
+            return { lat: lat2 * 180 / Math.PI, lon: lon2 * 180 / Math.PI };
+        }
+
+        /**
+         * 強風域・暴風域などの中心座標を求める関数
+         */
+        function getCircleCenter(p, area) {
+            if (!area || area.offsetKm === 0) return { lat: p.lat, lon: p.lon };
+            return getDestPoint(p.lat, p.lon, area.offsetKm, area.offsetBearing);
+        }
+
+        /**
+         * 複数のプロキシや直接通信、JSONラッパー方式を用いてフェッチ
+         */
+        async function fetchWithProxy(url) {
+            let lastError = null;
+
+            try {
+                const response = await fetch(url);
+                if (response.ok) return response;
+            } catch (e) {
+                lastError = e;
+            }
+
+            for (let proxy of PROXIES) {
+                try {
+                    const response = await fetch(proxy + encodeURIComponent(url));
+                    if (response.ok) return response;
+                } catch (e) {
+                    lastError = e;
+                }
+            }
+
+            try {
+                const aoUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                const response = await fetch(aoUrl);
+                if (response.ok) {
+                    const json = await response.json();
+                    if (json.contents) {
+                        return {
+                            ok: true,
+                            text: async () => json.contents,
+                            json: async () => JSON.parse(json.contents)
+                        };
+                    }
+                }
+            } catch (e) {
+                lastError = e;
+            }
+
+            throw lastError || new Error("通信に失敗しました。");
+        }
+
+        async function loadMaps() {
+            try {
+                const [worldRes, japanRes] = await Promise.all([
+                    fetchWithProxy('https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson').catch(() => null),
+                    fetchWithProxy('https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson').catch(() => null)
+                ]);
+                
+                if (worldRes && worldRes.ok) {
+                    const txt = await worldRes.text();
+                    worldGeoJson = JSON.parse(txt);
+                }
+                if (japanRes && japanRes.ok) {
+                    const txt = await japanRes.text();
+                    japanGeoJson = JSON.parse(txt);
+                }
+            } catch (e) {
+                console.warn("地図の背景輪郭データの取得に一部失敗しました。");
+            }
+        }
+
+        lucide.createIcons();
+
+        function formatToReiwa(date) {
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1;
+            const day = date.getDate();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const reiwaYear = year - 2018;
+            const eraName = year >= 2019 ? `令和${reiwaYear}年` : `${year}年`;
+            return `${eraName}${month}月${day}日 ${hours}:${minutes}`;
+        }
+
+        function splitCoordinate(s) {
+            const m = s.match(/^(?<la>[+-]\d+(\.\d+)?)(?<lo>[+-]\d+(\.\d+)?)\/$/);
+            return m ? [parseFloat(m.groups.la), parseFloat(m.groups.lo)] : null;
+        }
+
+        function copyToClipboard(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').textContent = msg;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+            }, 2500);
+        }
+
+        function setViewSetting(key, value) {
+            if (viewSettings[key] === value) return;
+            viewSettings[key] = value;
+            updateMapControlStyles();
+            
+            if (key === 'targetMode' || key === 'show3h') {
+                drawMapCore();
+            } else {
+                processAndDrawCanvas(false);
+            }
+        }
+
+        function updateMapControlStyles() {
+            const activeClass = "bg-blue-600 text-white shadow-sm";
+            const inactiveClass = "text-slate-500 hover:text-slate-800";
+            
+            const btnWide = document.getElementById('btnWide');
+            if (btnWide) btnWide.className = `px-3 py-1.5 rounded-md text-[10px] font-black transition-colors ${viewSettings.mapView === 'wide' ? activeClass : inactiveClass}`;
+            
+            const btnFocus = document.getElementById('btnFocus');
+            if (btnFocus) btnFocus.className = `px-3 py-1.5 rounded-md text-[10px] font-black transition-colors ${viewSettings.mapView === 'focus' ? activeClass : inactiveClass}`;
+            
+            const btnTargetAll = document.getElementById('btnTargetAll');
+            if (btnTargetAll) btnTargetAll.className = `px-3 py-1.5 rounded-md text-[10px] font-black transition-colors ${viewSettings.targetMode === 'all' ? activeClass : inactiveClass}`;
+
+            const btnTarget24h = document.getElementById('btnTarget24h');
+            if (btnTarget24h) btnTarget24h.className = `px-3 py-1.5 rounded-md text-[10px] font-black transition-colors ${viewSettings.targetMode === '24h' ? activeClass : inactiveClass}`;
+            
+            const btnTarget1h = document.getElementById('btnTarget1h');
+            if (btnTarget1h) btnTarget1h.className = `px-3 py-1.5 rounded-md text-[10px] font-black transition-colors ${viewSettings.targetMode === '1h_only' ? activeClass : inactiveClass}`;
+            
+            const btnShow3hTrue = document.getElementById('btnShow3hTrue');
+            if (btnShow3hTrue) btnShow3hTrue.className = `px-3 py-1.5 rounded-md text-[10px] font-black transition-colors ${viewSettings.show3h === true ? activeClass : inactiveClass}`;
+            
+            const btnShow3hFalse = document.getElementById('btnShow3hFalse');
+            if (btnShow3hFalse) btnShow3hFalse.className = `px-3 py-1.5 rounded-md text-[10px] font-black transition-colors ${viewSettings.show3h === false ? activeClass : inactiveClass}`;
+
+            const container3h = document.getElementById('container3hControls');
+            if (container3h) {
+                if (hasAny3hForecast) {
+                    container3h.classList.remove('hidden');
+                } else {
+                    container3h.classList.add('hidden');
+                }
+            }
+        }
+
+        function generateOtherTyphoonButtons(currentEventId) {
+            if (globalTyphoonItems.length <= 1) return '';
+            
+            let html = '<div class="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-50 items-center">';
+            html += '<span class="text-[10px] font-bold text-slate-400 flex items-center mr-1">表示切り替え:</span>';
+            
+            if (currentEventId === null) {
+                html += `<span class="text-[10px] font-black px-3 py-1.5 rounded-full bg-slate-600 text-white shadow-sm cursor-default">すべて表示</span>`;
+            } else {
+                html += `<button onclick="fetchDetail(null, true)" class="text-[10px] font-black px-3 py-1.5 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm">すべて表示</button>`;
+            }
+
+            globalTyphoonItems.forEach(t => {
+                if (t.eventId === currentEventId) {
+                    html += `<span class="text-[10px] font-black px-3 py-1.5 rounded-full bg-blue-600 text-white shadow-sm cursor-default">${t.displayTitle}</span>`;
+                } else {
+                    html += `<button onclick="fetchDetailByEventId('${t.eventId}')" class="text-[10px] font-black px-3 py-1.5 rounded-full bg-white text-blue-600 border border-blue-200 hover:bg-blue-50 transition-colors shadow-sm">${t.displayTitle}</button>`;
+                }
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function fetchDetailByEventId(eventId) {
+            const item = globalTyphoonItems.find(t => t.eventId === eventId);
+            if (item) {
+                fetchDetail(item, false);
+            }
+        }
+
+        function copyForecastData(endIndex) {
+            if (!currentForecastDataList || currentForecastDataList.length === 0) return;
+            
+            let text = "【台風情報】\n";
+            let startIndex = endIndex;
+            const targetTyphoonName = currentForecastDataList[endIndex].typhoonName;
+            
+            while(startIndex > 0 && currentForecastDataList[startIndex - 1].typhoonName === targetTyphoonName) {
+                startIndex--;
+            }
+
+            for (let i = startIndex; i <= endIndex; i++) {
+                const data = currentForecastDataList[i];
+                const m = data.date.getMonth() + 1;
+                const d = data.date.getDate();
+                const h = data.date.getHours();
+                
+                let typeStr = data.typeSuffix;
+                if(typeStr.includes('実況')) typeStr = '実況';
+                else if(typeStr.includes('推定')) typeStr = '推定';
+                else if(typeStr.includes('予報')) typeStr = '予報';
+                else typeStr = '予報';
+                
+                text += `▼${data.typhoonName}　${m}月${d}日 ${h}時${typeStr}\n`;
+                text += `　存在位置　　　${data.location}\n`;
+                text += `　大きさ　　　　${data.size}\n`;
+                text += `　強さ　　　　　${data.intensity}\n`;
+                text += `　進行方向　　　${data.direction}\n`;
+                text += `　速さ　　　　　${data.speedText}\n`;
+                text += `　中心気圧　　　${data.pressure}\n`;
+                text += `　最大風速　　　${data.maxWind}\n`;
+                text += `　最大瞬間風速　${data.maxGust}\n`;
+                if (data.galeArea !== 'ー') {
+                    text += `　強風域　　　　${data.galeArea}\n`;
+                }
+                
+                if (i !== endIndex) {
+                    text += "\n";
+                }
+            }
+            
+            copyToClipboard(text);
+            showToast("情報をコピーしました");
+        }
+
+        async function fetchTyphoonFeed() {
+            const container = document.getElementById('entryList');
+            container.innerHTML = `<div class="py-20 text-center text-slate-200"><div class="inline-block h-5 w-5 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div><p class="text-xs font-bold mt-4 text-slate-400">気象庁から最新情報を取得中...</p></div>`;
+            
+            try {
+                const response = await fetchWithProxy(JMA_FEED_EXTRA);
+                const text = await response.text();
+                const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
+                const entries = Array.from(xmlDoc.getElementsByTagName('entry'));
+                
+                let typhoonEntries = [];
+
+                for (let entry of entries) {
+                    const title = entry.querySelector('title')?.textContent || '';
+                    if (title.includes('台風解析・予報情報') || title.includes('熱帯低気圧解析・予報情報')) {
+                        const link = entry.querySelector('link[type="application/xml"]')?.getAttribute('href') || entry.querySelector('link')?.getAttribute('href');
+                        if (!link) continue;
+                        
+                        const updatedStr = entry.getElementsByTagName('updated')[0]?.textContent;
+                        const updated = updatedStr ? new Date(updatedStr) : new Date();
+                        const author = entry.getElementsByTagName('author')[0]?.getElementsByTagName('name')[0]?.textContent || "気象庁";
+                        
+                        typhoonEntries.push({ link, updated, author, title });
+                    }
+                }
+
+                const fetchPromises = typhoonEntries.map(entry => 
+                    fetchWithProxy(entry.link)
+                        .then(r => r.text())
+                        .then(xmlText => {
+                            const cleanXml = xmlText.replace(/<([a-zA-Z0-9_-]+:)/g, '<').replace(/<\/([a-zA-Z0-9_-]+:)/g, '</');
+                            const doc = new DOMParser().parseFromString(cleanXml, "text/xml");
+                            
+                            // ReportDateTime を優先して取得
+                            const reportDateTimeNode = doc.querySelector('ReportDateTime');
+                            if (reportDateTimeNode) {
+                                entry.updated = new Date(reportDateTimeNode.textContent);
+                            }
+                            
+                            const eventId = doc.querySelector('EventID')?.textContent || "";
+                            const numberNode = doc.querySelector('TyphoonNamePart Number');
+                            const nameKanaNode = doc.querySelector('TyphoonNamePart NameKana');
+                            const classNode = doc.querySelector('TyphoonClass');
+                            
+                            let typhoonNum = null;
+                            let rawNumber = "";
+                            
+                            if (numberNode && numberNode.textContent.trim().length === 4) {
+                                typhoonNum = parseInt(numberNode.textContent.substring(2, 4), 10);
+                                rawNumber = numberNode.textContent.trim();
+                            } else if (eventId && eventId.startsWith("TC") && eventId.length === 6) {
+                                rawNumber = eventId.substring(2, 6);
+                                typhoonNum = parseInt(rawNumber.substring(2, 4), 10);
+                            }
+                            
+                            let label = "台風";
+                            if (classNode) {
+                                 if(classNode.textContent.includes("熱帯低気圧")) label = "熱帯低気圧";
+                                 else if(classNode.textContent.includes("温帯低気圧")) label = "温帯低気圧";
+                            } else {
+                                 if(entry.title.includes("熱帯低気圧")) label = "熱帯低気圧";
+                                 else if(entry.title.includes("温帯低気圧")) label = "温帯低気圧";
+                            }
+                            
+                            let obsPoint = null;
+                            const allInfos = Array.from(doc.querySelectorAll('MeteorologicalInfo'));
+                            const obsInfo = allInfos.find(info => info.querySelector('DateTime')?.getAttribute('type') === '実況');
+                            if (obsInfo) {
+                                const center = Array.from(obsInfo.querySelectorAll('Property')).find(p => p.querySelector('Type')?.textContent === '中心');
+                                if (center) {
+                                    const coordNode = center.querySelector('Coordinate[type="中心位置（度）"], BasePoint[type="中心位置（度）"]');
+                                    if (coordNode) {
+                                        const pos = splitCoordinate(coordNode.textContent);
+                                        if (pos) {
+                                            obsPoint = { lat: pos[0], lon: pos[1], time: new Date(obsInfo.querySelector('DateTime').textContent) };
+                                        }
+                                    }
+                                }
+                            }
+
+                            return {
+                                ...entry,
+                                eventId: eventId || typhoonNum || entry.title,
+                                typhoonNum,
+                                rawNumber,
+                                nameKana: nameKanaNode ? nameKanaNode.textContent : "",
+                                label,
+                                obsPoint,
+                                xmlText,
+                                doc
+                            };
+                        })
+                        .catch(e => null) 
+                );
+
+                const parsedResults = (await Promise.all(fetchPromises)).filter(r => r !== null);
+                let typhoonMap = new Map();
+
+                for (let item of parsedResults) {
+                    const key = item.eventId;
+                    
+                    let infoClass = { label: item.label, class: "badge-typhoon" };
+                    if(item.label === "熱帯低気圧") infoClass.class = "badge-td";
+                    if(item.label === "温帯低気圧" || item.label === "低気圧") infoClass.class = "badge-low";
+
+                    let displayTitle = item.label;
+                    if (item.typhoonNum) {
+                        displayTitle = `${item.label}第${item.typhoonNum}号`;
+                    }
+
+                    if (!typhoonMap.has(key)) {
+                        typhoonMap.set(key, { 
+                            updated: item.updated, 
+                            author: item.author, 
+                            link: item.link, 
+                            displayTitle, 
+                            infoClass,
+                            eventId: item.eventId,
+                            typhoonNum: item.typhoonNum,
+                            rawNumber: item.rawNumber,
+                            nameKana: item.nameKana,
+                            history: [{ updated: item.updated, link: item.link, obsPoint: item.obsPoint, xmlText: item.xmlText, doc: item.doc }]
+                        });
+                    } else {
+                        const existing = typhoonMap.get(key);
+                        existing.history.push({ updated: item.updated, link: item.link, obsPoint: item.obsPoint, xmlText: item.xmlText, doc: item.doc });
+                        
+                        if (item.updated > existing.updated) {
+                            existing.updated = item.updated;
+                            existing.author = item.author;
+                            existing.link = item.link;
+                            existing.displayTitle = displayTitle;
+                            existing.infoClass = infoClass;
+                            existing.typhoonNum = item.typhoonNum || existing.typhoonNum;
+                            existing.rawNumber = item.rawNumber || existing.rawNumber;
+                            existing.nameKana = item.nameKana || existing.nameKana;
+                        }
+                    }
+                }
+
+                globalTyphoonItems = Array.from(typhoonMap.values());
+                globalTyphoonItems.sort((a, b) => b.updated - a.updated);
+                renderList(globalTyphoonItems);
+                document.getElementById('lastUpdate').innerText = `UPDATED: ${new Date().toLocaleTimeString('ja-JP')}`;
+            } catch (error) {
+                console.error(error);
+                container.innerHTML = `<div class="py-20 text-center text-red-400 text-xs font-bold">情報の取得に失敗しました。時間をおいてもう一度更新してください。</div>`;
+            }
+        }
+
+        function renderList(items) {
+            const container = document.getElementById('entryList');
+            container.innerHTML = "";
+            if (items.length === 0) {
+                container.innerHTML = `<div class="py-20 text-center text-slate-400 space-y-4"><p class="text-sm font-bold">現在、発表中の台風情報はありません</p></div>`;
+                return;
+            }
+            const header = document.createElement('div');
+            header.className = "category-header px-4 py-2 border-b border-slate-50";
+            header.innerHTML = `<span class="text-[8px] font-black text-slate-200 uppercase tracking-[0.2em]">発表中の情報</span>`;
+            container.appendChild(header);
+
+            if (items.length > 1) {
+                const btnAll = document.createElement('button');
+                btnAll.className = "entry-card w-full text-left px-4 py-4 outline-none border-b border-slate-50 flex justify-between items-center group bg-slate-50/50";
+                btnAll.innerHTML = `
+                    <div class="space-y-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-[8px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white">一括表示</span>
+                            <h3 class="text-xs font-bold text-slate-800 leading-tight group-hover:text-blue-600 transition-colors">すべての台風情報を表示</h3>
+                        </div>
+                        <div class="flex items-center gap-2 text-[9px] font-bold text-slate-400">
+                            <span>現在 ${items.length} 件の台風・低気圧情報が発表されています</span>
+                        </div>
+                    </div>
+                    <i data-lucide="map" class="w-4 h-4 text-slate-300 group-hover:text-blue-400 transition-colors"></i>
+                `;
+                btnAll.onclick = () => fetchDetail(null, true);
+                container.appendChild(btnAll);
+            }
+
+            items.forEach(item => {
+                const btn = document.createElement('button');
+                btn.className = "entry-card w-full text-left px-4 py-4 outline-none border-b border-slate-50 flex justify-between items-center group";
+                btn.innerHTML = `
+                    <div class="space-y-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-[8px] font-black px-1.5 py-0.5 rounded ${item.infoClass.class}">${item.infoClass.label}</span>
+                            <h3 class="text-xs font-bold text-slate-600 leading-tight group-hover:text-blue-600 transition-colors">${item.displayTitle}</h3>
+                        </div>
+                        <div class="flex items-center gap-2 text-[9px] font-bold text-slate-300">
+                            <span>${formatToReiwa(item.updated)}</span>
+                            <span>|</span>
+                            <span>${item.author}</span>
+                        </div>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 group-hover:text-blue-400 transition-colors"></i>
+                `;
+                btn.onclick = () => fetchDetail(item, false);
+                container.appendChild(btn);
+            });
+            lucide.createIcons();
+        }
+
+        async function fetchTyphoonPoints(tItem) {
+            const pointMap = new Map(); 
+            let latestDoc = null;
+            let latestUpdated = 0;
+            
+            let digitalTyphoonPoints = [];
+            let dtProperties = null;
+            let dtId = null;
+            
+            if (tItem.rawNumber && tItem.rawNumber.length === 4) {
+                dtId = "20" + tItem.rawNumber;
+            } else if (tItem.typhoonNum) {
+                dtId = "20" + String(tItem.typhoonNum).padStart(2, '0');
+            }
+
+            if (dtId) {
+                const dtUrl = `https://agora.ex.nii.ac.jp/digital-typhoon/geojson/wnp/${dtId}.ja.json`;
+                try {
+                    const dtRes = await fetchWithProxy(dtUrl);
+                    if (dtRes && dtRes.ok) {
+                        const dtData = await dtRes.json();
+                        if (dtData && dtData.features) {
+                            dtProperties = dtData.properties;
+                            dtData.features.forEach(feat => {
+                                const coords = feat.geometry.coordinates;
+                                const props = feat.properties;
+                                const timeMs = props.time * 1000;
+                                
+                                let intensity = "ー";
+                                let size = "ー";
+                                let label = "熱帯低気圧";
+                                if (props.class === 2) label = "熱帯低気圧";
+                                else if (props.class === 3) { label = "台風"; intensity = "並みの強さ"; }
+                                else if (props.class === 4) { label = "台風"; intensity = "強い"; }
+                                else if (props.class === 5) { label = "台風"; intensity = "非常に強い"; }
+                                else if (props.class === 6) { label = "台風"; intensity = "猛烈な"; }
+
+                                const windMs = props.wind ? Math.round(props.wind * 0.514444) : 0;
+
+                                digitalTyphoonPoints.push({
+                                    rawType: 'obs',
+                                    type: 'past',
+                                    lat: coords[1],
+                                    lon: coords[0],
+                                    stormArea: null,
+                                    gale: null,
+                                    probR: 0,
+                                    time: new Date(timeMs),
+                                    intensity: intensity,
+                                    hoursFromObs: 0,
+                                    location: "過去位置（デジタル台風）",
+                                    pressure: props.pressure ? props.pressure + "hPa" : "ー",
+                                    maxWind: props.wind ? `${windMs}m/s（${props.wind}kt）` : "ー",
+                                    maxGust: "ー",
+                                    size: size,
+                                    direction: "ー",
+                                    speedText: "ー",
+                                    galeAreaForCopy: "ー",
+                                    tClass: label,
+                                    typeAttr: "実況（デジタル台風ログ）",
+                                    fromDigitalTyphoon: true
+                                });
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.warn("デジタル台風のデータが見つからないか取得に失敗しました。");
+                }
+            }
+
+            const fetchPromises = tItem.history.map(hist => 
+                fetchWithProxy(hist.link)
+                    .then(r => r.text())
+                    .then(xmlText => ({ link: hist.link, updated: hist.updated, xmlText }))
+                    .catch(e => null)
+            );
+            
+            let results = (await Promise.all(fetchPromises)).filter(r => r !== null);
+            
+            // ReportDateTime の適用
+            results.forEach(res => {
+                const tempCleanXml = res.xmlText.replace(/<([a-zA-Z0-9_-]+:)/g, '<').replace(/<\/([a-zA-Z0-9_-]+:)/g, '</');
+                const tempDoc = new DOMParser().parseFromString(tempCleanXml, "text/xml");
+                const reportDateTimeNode = tempDoc.querySelector('ReportDateTime');
+                if (reportDateTimeNode) {
+                    res.updated = new Date(reportDateTimeNode.textContent);
+                }
+            });
+            results.sort((a, b) => a.updated - b.updated);
+            
+            tItem.historyData = [];
+            let currentRawXml = "";
+
+            let latestForecastIndex = results.length - 1;
+            for (let i = results.length - 1; i >= 0; i--) {
+                const tempCleanXml = results[i].xmlText.replace(/<([a-zA-Z0-9_-]+:)/g, '<').replace(/<\/([a-zA-Z0-9_-]+:)/g, '</');
+                const tempDoc = new DOMParser().parseFromString(tempCleanXml, "text/xml");
+                const tempInfos = Array.from(tempDoc.querySelectorAll('MeteorologicalInfo'));
+                const hasForecast = tempInfos.some(info => {
+                    const typeAttr = info.querySelector('DateTime')?.getAttribute('type');
+                    return typeAttr && typeAttr.includes('予報');
+                });
+                if (hasForecast) {
+                    latestForecastIndex = i;
+                    break;
+                }
+            }
+
+            results.forEach((res, index) => {
+                tItem.historyData.push(res);
+                const cleanXml = res.xmlText.replace(/<([a-zA-Z0-9_-]+:)/g, '<').replace(/<\/([a-zA-Z0-9_-]+:)/g, '</');
+                const doc = new DOMParser().parseFromString(cleanXml, "text/xml");
+                
+                const timeMs = res.updated.getTime();
+                if (timeMs > latestUpdated) {
+                    latestUpdated = timeMs;
+                    latestDoc = doc;
+                    currentRawXml = res.xmlText;
+                }
+
+                const isLatestXml = (index === results.length - 1);
+                const isLatestForecastXml = (index === latestForecastIndex);
+                const allInfos = Array.from(doc.querySelectorAll('MeteorologicalInfo'));
+                
+                allInfos.forEach(info => {
+                    const dtNode = info.querySelector('DateTime');
+                    if (!dtNode) return;
+                    const timeVal = new Date(dtNode.textContent).getTime();
+                    
+                    const typeAttr = dtNode.getAttribute('type');
+                    const isObs = typeAttr === '実況';
+                    const isEstimate = typeAttr?.includes('推定');
+                    const isForecast = typeAttr?.includes('予報');
+
+                    if (!isObs) {
+                        if (isEstimate && !isLatestXml) return;
+                        if (isForecast && !isLatestForecastXml) return;
+                        if (!isEstimate && !isForecast && !isLatestXml) return;
+                    }
+                    
+                    const props = Array.from(info.querySelectorAll('Property'));
+                    const center = props.find(p => p.querySelector('Type')?.textContent === '中心');
+                    const wind = props.find(p => p.querySelector('Type')?.textContent === '風');
+                    const classProp = props.find(p => p.querySelector('Type')?.textContent === '階級');
+                    
+                    if (center) {
+                        const coordNode = center.querySelector('Coordinate[type="中心位置（度）"], BasePoint[type="中心位置（度）"]');
+                        const pos = coordNode ? splitCoordinate(coordNode.textContent) : null;
+                        if (pos) {
+                            const locationNode = info.querySelector('Location');
+                            const locationStr = locationNode ? locationNode.textContent : 'ー';
+                            const pressure = center.querySelector('Pressure[unit="hPa"]')?.textContent ? center.querySelector('Pressure[unit="hPa"]').textContent + 'hPa' : 'ー';
+                            
+                            const maxWindText = wind?.querySelector('WindSpeed[unit="m/s"][type="最大風速"]')?.textContent;
+                            const maxWind = (maxWindText && maxWindText !== "0" && maxWindText !== "0.0") ? `${maxWindText}m/s（中心付近）` : 'ー';
+                            
+                            const maxGustText = wind?.querySelector('WindSpeed[unit="m/s"][type="最大瞬間風速"]')?.textContent;
+                            const maxGust = (maxGustText && maxGustText !== "0" && maxGustText !== "0.0") ? `${maxGustText}m/s` : 'ー';
+                            
+                            const intensity = classProp?.querySelector('IntensityClass')?.textContent || 'ー';
+                            const size = classProp?.querySelector('AreaClass')?.textContent || 'ー';
+                            
+                            const directionNode = center.querySelector('Direction[type="移動方向"]');
+                            const direction = directionNode ? directionNode.textContent : 'ー';
+                            
+                            const speedNode = center.querySelector('Speed[unit="km/h"]') || center.querySelector('Speed[unit="ノット"]');
+                            let speedText = 'ー';
+                            if (speedNode) {
+                                const val = speedNode.textContent;
+                                const unit = speedNode.getAttribute('unit') || '';
+                                speedText = val ? val + unit : (speedNode.getAttribute('condition') || 'ー');
+                            }
+
+                            const galeAreaNode = wind?.querySelector('WarningAreaPart[type="強風域"]');
+                            let galeAreaForCopy = 'ー';
+                            if (galeAreaNode) {
+                                const radii = Array.from(galeAreaNode.querySelectorAll('Radius[unit="km"]'));
+                                if (radii.length > 0) {
+                                    const maxR = Math.max(...radii.map(r => parseFloat(r.textContent)));
+                                    galeAreaForCopy = `${maxR}km`;
+                                }
+                            }
+
+                            const typhoonClassNode = classProp?.querySelector('TyphoonClass');
+                            const tClass = typhoonClassNode ? typhoonClassNode.textContent : "";
+
+                            const gale = calculateWindAreaOffset(wind?.querySelector('WarningAreaPart[type="強風域"] Axes'));
+                            
+                            const stormNodes = wind ? Array.from(wind.querySelectorAll('WarningAreaPart[type="暴風域"], WarningAreaPart[type="暴風警戒域"]')) : [];
+                            let stormArea = null;
+                            if (stormNodes.length > 0) {
+                                // 暴風域と暴風警戒域の定義から、偏心を含む半径情報を計算
+                                stormArea = calculateWindAreaOffset(stormNodes[0].querySelector('Axes'));
+                            }
+
+                            const prob = center.querySelector('ProbabilityCircle[type="予報円"]');
+                            const probR = parseFloat(prob?.querySelector('Radius[unit="km"]')?.textContent || 0);
+                            
+                            const rawType = isObs ? 'obs' : (isEstimate ? 'estimate' : (prob ? 'forecast' : 'forecast_point')); 
+                            const key = `${timeVal}_${rawType}`; 
+                            
+                            pointMap.set(key, { 
+                                rawType, lat: pos[0], lon: pos[1], 
+                                stormArea: stormArea, 
+                                gale, probR, time: new Date(timeVal),
+                                intensity: intensity,
+                                hoursFromObs: 0,
+                                location: locationStr,
+                                pressure: pressure,
+                                maxWind: maxWind,
+                                maxGust: maxGust,
+                                size: size,
+                                direction: direction,
+                                speedText: speedText,
+                                galeAreaForCopy: galeAreaForCopy,
+                                tClass: tClass,
+                                typeAttr: typeAttr || '予報・その他'
+                            });
+                        }
+                    }
+                });
+            });
+
+            digitalTyphoonPoints.forEach(p => {
+                const timeVal = p.time.getTime();
+                const existingKey = Array.from(pointMap.keys()).find(k => {
+                    const [kTime, kType] = k.split('_');
+                    return Math.abs(parseInt(kTime, 10) - timeVal) < 60000;
+                });
+                
+                if (!existingKey) {
+                    const key = `${timeVal}_past_dt`;
+                    pointMap.set(key, p);
+                }
+            });
+
+            let currentDataPoints = Array.from(pointMap.values());
+            if (currentDataPoints.length > 0) {
+                currentDataPoints.sort((a, b) => a.time - b.time);
+                
+                const obsPoints = currentDataPoints.filter(p => p.rawType === 'obs');
+                const latestObsT = obsPoints.length > 0 ? Math.max(...obsPoints.map(p => p.time.getTime())) : 0;
+                
+                currentDataPoints.forEach(p => { 
+                    p.type = p.rawType === 'obs' ? (p.time.getTime() === latestObsT ? 'current' : 'past') : 
+                             (p.rawType === 'estimate' ? 'estimate' : 
+                             (p.rawType === 'forecast' ? 'forecast' : 'forecast_point')); 
+                });
+                
+                const currentObsPoint = currentDataPoints.find(p => p.type === 'current');
+                const baseTimeMs = currentObsPoint ? currentObsPoint.time.getTime() : latestObsT;
+                
+                let baseAnchorTimeMs = baseTimeMs;
+                if (baseTimeMs > 0) {
+                    const baseDate = new Date(baseTimeMs);
+                    const hour = baseDate.getHours();
+                    if (hour % 3 !== 0) {
+                        const targetHour = hour - (hour % 3);
+                        baseDate.setHours(targetHour, 0, 0, 0);
+                    } else {
+                        baseDate.setMinutes(0, 0, 0);
+                    }
+                    baseAnchorTimeMs = baseDate.getTime();
+                }
+                
+                currentDataPoints.forEach(p => {
+                    if (baseAnchorTimeMs > 0) {
+                        const d1 = new Date(p.time);
+                        d1.setMinutes(0, 0, 0);
+                        p.hoursFromObs = Math.round((d1.getTime() - baseAnchorTimeMs) / (1000 * 60 * 60));
+                    } else {
+                        p.hoursFromObs = 0;
+                    }
+                });
+            }
+
+            return {
+                item: tItem,
+                points: currentDataPoints,
+                latestDoc: latestDoc,
+                rawXml: currentRawXml,
+                dtProperties: dtProperties,
+                historyData: tItem.historyData
+            };
+        }
+
+        async function fetchDetail(item, isAllMode = false) {
+            currentIsAllMode = isAllMode;
+            currentItem = item;
+            const area = document.getElementById('contentArea');
+            area.classList.remove('hidden');
+            setTimeout(() => area.classList.remove('opacity-0', 'translate-y-4'), 10);
+            document.body.style.overflow = 'hidden';
+            
+            const container = document.getElementById('detailContainer');
+            container.innerHTML = `<div class="py-40 text-center"><div class="inline-block h-6 w-6 border-2 border-slate-100 border-t-blue-500 rounded-full animate-spin"></div><p class="text-xs text-slate-400 mt-4 font-bold">台風・過去進路データを取得中...</p></div>`;
+
+            currentForecastDataList = [];
+
+            try {
+                allTyphoonDataPoints = [];
+                
+                // 全台風のデータを並列で取得・構築
+                const promises = globalTyphoonItems.map(t => fetchTyphoonPoints(t));
+                allTyphoonDataPoints = await Promise.all(promises);
+
+                hasAny3hForecast = allTyphoonDataPoints.some(tData => 
+                    tData.points.some(p => (p.rawType === 'forecast' || p.rawType === 'forecast_point') && p.hoursFromObs > 0 && p.hoursFromObs % 12 !== 0)
+                );
+
+                let headerHtml = "";
+                let bodyHtml = "";
+                let mapSubtitle = "";
+
+                if (isAllMode) {
+                    const latestUpdate = new Date(Math.max(...globalTyphoonItems.map(t => t.updated.getTime())));
+                    
+                    headerHtml = `
+                        <header class="space-y-4 pb-4 border-b border-slate-50">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="text-[10px] font-black px-2 py-1 rounded bg-slate-600 text-white">一括表示</span>
+                                <div class="flex items-center gap-1.5 text-[10px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200/50">
+                                    <i data-lucide="database" class="w-3 h-3"></i>
+                                    <span>経路取得完了 (${allTyphoonDataPoints.length}件)</span>
+                                </div>
+                            </div>
+                            <h2 class="text-xl md:text-2xl font-black text-slate-800 leading-tight">すべての台風・低気圧情報</h2>
+                            <div class="flex items-center gap-3 text-[10px] font-bold text-slate-400">
+                                <span class="flex items-center gap-1"><i data-lucide="building" class="w-3 h-3"></i> 気象庁</span>
+                                <span>/</span>
+                                <span>${formatToReiwa(latestUpdate)} 発表</span>
+                            </div>
+                            ${generateOtherTyphoonButtons(null)}
+                        </header>
+                    `;
+
+                    let allForecastHtml = "";
+                    currentDataPoints = []; // マップ境界計算用
+
+                    allTyphoonDataPoints.forEach(tData => {
+                        const tItem = tData.item;
+                        const dataPoints = tData.points;
+                        const dtProperties = tData.dtProperties;
+                        
+                        currentDataPoints.push(...dataPoints);
+
+                        let finalTitle = tItem.displayTitle;
+                        let asianName = tItem.nameKana || (dtProperties && dtProperties.name) || "";
+                        if (tItem.typhoonNum) {
+                            finalTitle = `台風第${tItem.typhoonNum}号`;
+                            if (tItem.infoClass.label !== '台風') finalTitle += ` (${tItem.infoClass.label})`;
+                            if (asianName) finalTitle += ` - ${asianName} -`;
+                        }
+
+                        // コピー用のタイトル（「台風08号」など）
+                        let copyTitle = tItem.infoClass.label;
+                        if (tItem.typhoonNum) {
+                            copyTitle = `台風${String(tItem.typhoonNum).padStart(2, '0')}号`;
+                        }
+
+                        let forecastHtml = '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">';
+                        const listPoints = dataPoints.filter(p => !p.fromDigitalTyphoon && p.type !== 'past');
+
+                        listPoints.forEach((p, idx) => {
+                            const dateObj = p.time;
+                            const timeText = dateObj ? dateObj.toLocaleString('ja-JP', {month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric'}) : '';
+                            const type = p.typeAttr;
+
+                            let currentTypeName = tItem.infoClass.label;
+                            if (p.tClass) {
+                                if (p.tClass.includes("温帯低気圧")) currentTypeName = "温帯低気圧";
+                                else if (p.tClass.includes("熱帯低気圧")) currentTypeName = "熱帯低気圧";
+                                else if (p.tClass.includes("台風")) currentTypeName = "台風";
+                            }
+                            let badgeClass = currentTypeName === "温帯低気圧" ? "badge-low" : (currentTypeName === "熱帯低気圧" ? "badge-td" : "badge-typhoon");
+
+                            currentForecastDataList.push({
+                                typhoonName: copyTitle,
+                                date: dateObj,
+                                typeSuffix: type.replace('・その他', ''),
+                                location: p.location,
+                                size: p.size,
+                                intensity: p.intensity,
+                                direction: p.direction,
+                                speedText: p.speedText,
+                                pressure: p.pressure,
+                                maxWind: p.maxWind,
+                                maxGust: p.maxGust,
+                                galeArea: p.galeAreaForCopy
+                            });
+
+                            forecastHtml += `
+                                <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm text-left no-select cursor-pointer transition-colors hover:border-blue-300 hover:shadow-md" ondblclick="copyForecastData(${currentForecastDataList.length - 1})" title="ダブルクリックで実況〜この時間帯の情報をコピー">
+                                    <div class="flex items-center justify-between border-b border-slate-50 pb-2 mb-3">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-md">${type}</span>
+                                            <span class="text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm ${badgeClass}">${currentTypeName}</span>
+                                        </div>
+                                        <span class="text-[10px] text-slate-400 font-bold tabular-nums">${timeText}</span>
+                                    </div>
+                                    <div class="grid grid-cols-1 gap-y-1.5 text-[11px] leading-relaxed">
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">存在位置</span><span class="font-bold text-slate-700">${p.location}</span></div>
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">大きさ</span><span class="font-bold text-slate-700">${p.size}</span></div>
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">強さ</span><span class="font-bold text-red-600">${p.intensity}</span></div>
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">進行方向</span><span class="font-bold text-slate-700">${p.direction}</span></div>
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">速さ</span><span class="font-bold text-slate-700">${p.speedText}</span></div>
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">中心気圧</span><span class="font-bold text-slate-700">${p.pressure}</span></div>
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">最大風速</span><span class="font-bold text-slate-700">${p.maxWind}</span></div>
+                                        <div class="flex"><span class="text-slate-400 w-24 shrink-0">最大瞬間風速</span><span class="font-bold text-slate-700">${p.maxGust}</span></div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        forecastHtml += '</div>';
+
+                        allForecastHtml += `
+                            <div class="mt-8">
+                                <h4 class="text-sm font-black text-slate-700 mb-4 flex items-center gap-2 border-l-4 border-blue-500 pl-2">${finalTitle}</h4>
+                                ${forecastHtml}
+                            </div>
+                        `;
+                    });
+
+                    bodyHtml = `
+                        <div class="space-y-6">
+                            <div class="pt-6 border-t border-slate-50">
+                                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-4 text-left">
+                                    <i data-lucide="list-tree" class="w-3 h-3 text-blue-500"></i> 実況・予報詳細リスト
+                                </h3>
+                                ${allForecastHtml}
+                            </div>
+                        </div>
+                    `;
+
+                } else {
+                    const mainData = allTyphoonDataPoints.find(r => r.item.eventId === currentItem.eventId) || allTyphoonDataPoints[0];
+                    currentDataPoints = mainData.points;
+                    currentDoc = mainData.latestDoc;
+                    currentRawXml = mainData.rawXml;
+                    currentItem.historyData = mainData.historyData;
+                    const dtProperties = mainData.dtProperties;
+
+                    const lastPoint = currentDataPoints[currentDataPoints.length - 1];
+                    if (lastPoint && lastPoint.time) {
+                        const m = lastPoint.time.getMonth() + 1;
+                        const d = lastPoint.time.getDate();
+                        const h = lastPoint.time.getHours();
+                        mapSubtitle = `${m}/${d} ${h}時までの経路`;
+                    }
+
+                    if (!currentDoc) throw new Error("有効なデータがありません");
+                    
+                    const doc = currentDoc;
+                    const headline = doc.getElementsByTagName('Headline')[0]?.getElementsByTagName('Text')[0]?.textContent || "";
+                    const bodyText = doc.getElementsByTagName('Body')[0]?.getElementsByTagName('Text')[0]?.textContent || "";
+                    
+                    let finalTitle = item.displayTitle;
+                    let asianName = item.nameKana;
+                    
+                    if (!asianName && dtProperties && dtProperties.name) {
+                        asianName = dtProperties.name;
+                    }
+
+                    if (item.typhoonNum) {
+                        finalTitle = `台風第${item.typhoonNum}号`;
+                        if (item.infoClass.label !== '台風') {
+                            finalTitle += ` (${item.infoClass.label})`;
+                        }
+                        if (asianName) {
+                            finalTitle += ` - ${asianName} -`;
+                        }
+                    }
+
+                    // コピー用のタイトル（「台風08号」など）
+                    let copyTitle = item.infoClass.label;
+                    if (item.typhoonNum) {
+                        copyTitle = `台風${String(item.typhoonNum).padStart(2, '0')}号`;
+                    }
+
+                    let intensityHeader = "";
+                    let sizeHeader = "";
+                    const latestObsInfo = currentDataPoints.find(p => p.type === 'current');
+                    if (latestObsInfo) {
+                        intensityHeader = latestObsInfo.intensity && latestObsInfo.intensity !== 'ー' ? latestObsInfo.intensity : "";
+                        sizeHeader = latestObsInfo.size && latestObsInfo.size !== 'ー' ? latestObsInfo.size : "";
+                    }
+
+                    let forecastHtml = '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">';
+                    const listPoints = currentDataPoints.filter(p => !p.fromDigitalTyphoon && p.type !== 'past');
+
+                    listPoints.forEach((p, index) => {
+                        const dateObj = p.time;
+                        const timeText = dateObj ? dateObj.toLocaleString('ja-JP', {month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric'}) : '';
+                        const type = p.typeAttr;
+
+                        let currentTypeName = item.infoClass.label;
+                        if (p.tClass) {
+                            if (p.tClass.includes("温帯低気圧")) {
+                                currentTypeName = "温帯低気圧";
+                            } else if (p.tClass.includes("熱帯低気圧")) {
+                                currentTypeName = "熱帯低気圧";
+                            } else if (p.tClass.includes("台風")) {
+                                currentTypeName = "台風";
+                            }
+                        }
+
+                        let badgeClass = "badge-low";
+                        if (currentTypeName === "温帯低気圧") {
+                            badgeClass = "badge-low";
+                        } else if (currentTypeName === "熱帯低気圧") {
+                            badgeClass = "badge-td";
+                        } else if (currentTypeName === "台風") {
+                            badgeClass = "badge-typhoon";
+                        }
+
+                        currentForecastDataList.push({
+                            typhoonName: copyTitle,
+                            date: dateObj,
+                            typeSuffix: type.replace('・その他', ''),
+                            location: p.location,
+                            size: p.size,
+                            intensity: p.intensity,
+                            direction: p.direction,
+                            speedText: p.speedText,
+                            pressure: p.pressure,
+                            maxWind: p.maxWind,
+                            maxGust: p.maxGust,
+                            galeArea: p.galeAreaForCopy
+                        });
+
+                        forecastHtml += `
+                            <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm text-left no-select cursor-pointer transition-colors hover:border-blue-300 hover:shadow-md" ondblclick="copyForecastData(${index})" title="ダブルクリックで実況〜この時間帯の情報をコピー">
+                                <div class="flex items-center justify-between border-b border-slate-50 pb-2 mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-md">${type}</span>
+                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm ${badgeClass}">${currentTypeName}</span>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400 font-bold tabular-nums">${timeText}</span>
+                                </div>
+                                <div class="grid grid-cols-1 gap-y-1.5 text-[11px] leading-relaxed">
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">存在位置</span><span class="font-bold text-slate-700">${p.location}</span></div>
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">大きさ</span><span class="font-bold text-slate-700">${p.size}</span></div>
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">強さ</span><span class="font-bold text-red-600">${p.intensity}</span></div>
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">進行方向</span><span class="font-bold text-slate-700">${p.direction}</span></div>
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">速さ</span><span class="font-bold text-slate-700">${p.speedText}</span></div>
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">中心気圧</span><span class="font-bold text-slate-700">${p.pressure}</span></div>
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">最大風速</span><span class="font-bold text-slate-700">${p.maxWind}</span></div>
+                                    <div class="flex"><span class="text-slate-400 w-24 shrink-0">最大瞬間風速</span><span class="font-bold text-slate-700">${p.maxGust}</span></div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    forecastHtml += '</div>';
+
+                    headerHtml = `
+                        <header class="space-y-4 pb-4 border-b border-slate-50">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="text-[10px] font-black px-2 py-1 rounded ${item.infoClass.class}">${item.infoClass.label}</span>
+                                ${sizeHeader ? `<span class="text-[10px] font-black px-2 py-1 rounded bg-amber-100 text-amber-700 border border-amber-200">大きさ: ${sizeHeader}</span>` : ''}
+                                ${intensityHeader ? `<span class="text-[10px] font-black px-2 py-1 rounded bg-red-100 text-red-700 border border-red-200">強さ: ${intensityHeader}</span>` : ''}
+                                ${allTyphoonDataPoints.length > 0 ? `
+                                    <div class="flex items-center gap-1.5 text-[10px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200/50">
+                                        <i data-lucide="database" class="w-3 h-3"></i>
+                                        <span>経路取得完了 (${allTyphoonDataPoints.length}件)</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <h2 class="text-xl md:text-2xl font-black text-slate-800 leading-tight">${finalTitle}</h2>
+                            <div class="flex items-center gap-3 text-[10px] font-bold text-slate-400">
+                                <span class="flex items-center gap-1"><i data-lucide="building" class="w-3 h-3"></i> ${item.author}</span>
+                                <span>/</span>
+                                <span>${formatToReiwa(item.updated)} 発表</span>
+                            </div>
+                            ${generateOtherTyphoonButtons(item.eventId)}
+                        </header>
+                    `;
+
+                    bodyHtml = `
+                        <div class="space-y-6">
+                            ${headline ? `<div class="p-5 bg-blue-50/50 rounded-2xl border border-blue-100/50 text-sm text-slate-700 font-bold leading-relaxed whitespace-pre-wrap text-left">${headline}</div>` : ''}
+                            ${bodyText ? `<article class="weather-text text-slate-600 text-sm text-left whitespace-pre-wrap px-1">${bodyText}</article>` : ''}
+                            
+                            <!-- Detailed List Table/Grid -->
+                            <div class="pt-6 border-t border-slate-50">
+                                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-4 text-left">
+                                    <i data-lucide="list-tree" class="w-3 h-3 text-blue-500"></i> 実況・予報詳細リスト
+                                </h3>
+                                ${forecastHtml}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                container.innerHTML = `
+                    <div class="fade-in space-y-8 text-left">
+                        ${headerHtml}
+                        
+                        <!-- Map Area -->
+                        <div class="space-y-3">
+                            <h3 id="mapTitle" class="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-2">
+                                <i data-lucide="map" class="w-3 h-3"></i> 台風経路・予報図 ${isAllMode ? '(一括表示)' : ''}
+                            </h3>
+                            
+                            <!-- Map Controls -->
+                            <div class="flex flex-col gap-2 mb-3">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <div class="flex bg-slate-100 rounded-lg p-1 shadow-inner">
+                                        <button id="btnWide" onclick="setViewSetting('mapView', 'wide')" class="px-3 py-1.5 rounded-md text-[10px] font-black transition-colors bg-blue-600 text-white shadow-sm">広域</button>
+                                        <button id="btnFocus" onclick="setViewSetting('mapView', 'focus')" class="px-3 py-1.5 rounded-md text-[10px] font-black transition-colors text-slate-500 hover:text-slate-800">詳細</button>
+                                    </div>
+                                    <div class="flex bg-slate-100 rounded-lg p-1 shadow-inner">
+                                        <button id="btnTargetAll" onclick="setViewSetting('targetMode', 'all')" class="px-3 py-1.5 rounded-md text-[10px] font-black transition-colors bg-blue-600 text-white shadow-sm">進路予想図</button>
+                                        <button id="btnTarget24h" onclick="setViewSetting('targetMode', '24h')" class="px-3 py-1.5 rounded-md text-[10px] font-black transition-colors text-slate-500 hover:text-slate-800">24時間以内</button>
+                                        <button id="btnTarget1h" onclick="setViewSetting('targetMode', '1h_only')" class="px-3 py-1.5 rounded-md text-[10px] font-black transition-colors text-slate-500 hover:text-slate-800">1時間後推定</button>
+                                    </div>
+                                </div>
+                                <div id="container3hControls" class="flex bg-slate-100 rounded-lg p-1 shadow-inner self-start hidden">
+                                    <button id="btnShow3hTrue" onclick="setViewSetting('show3h', true)" class="px-3 py-1.5 rounded-md text-[10px] font-black transition-colors bg-blue-600 text-white shadow-sm">3時間毎表示</button>
+                                    <button id="btnShow3hFalse" onclick="setViewSetting('show3h', false)" class="px-3 py-1.5 rounded-md text-[10px] font-black transition-colors text-slate-500 hover:text-slate-800">3時間毎非表示</button>
+                                </div>
+                            </div>
+
+                            <div class="w-full flex-1 h-[60vh] md:h-[75vh] lg:h-[85vh] min-h-[450px] md:min-h-[600px] max-h-[1000px] bg-[#5dade2] rounded-2xl overflow-hidden border border-slate-200 relative shadow-inner z-0">
+                                <canvas id="typhoonCanvas" class="w-full h-full absolute inset-0 cursor-crosshair touch-none"></canvas>
+
+                                <!-- Zoom Buttons -->
+                                <div class="absolute bottom-4 right-4 flex flex-col gap-2 z-30">
+                                    <button onclick="zoomMap(1.5)" class="w-8 h-8 bg-white/90 backdrop-blur-md rounded-xl border border-slate-200 shadow-sm flex items-center justify-center text-slate-600 font-black hover:bg-slate-50 transition-colors">＋</button>
+                                    <button onclick="zoomMap(1 / 1.5)" class="w-8 h-8 bg-white/90 backdrop-blur-md rounded-xl border border-slate-200 shadow-sm flex items-center justify-center text-slate-600 font-black hover:bg-slate-50 transition-colors">－</button>
+                                </div>
+
+                                <!-- Legend -->
+                                <div class="absolute bottom-4 left-4 flex flex-col gap-1 pointer-events-none bg-white/90 p-3 rounded-xl backdrop-blur-md border border-white/50 shadow-sm z-[1000]">
+                                    <div class="flex items-center gap-2"><span class="w-3 h-0 border-t-[2.5px] border-[#1e40af]"></span><span class="text-[10px] font-bold text-slate-600">過去の経路</span></div>
+                                    <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full border-2 border-white shadow-[0_0_2px_rgba(0,0,0,0.3)]"></span><span class="text-[10px] font-bold text-slate-600">予報円</span></div>
+                                    <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-red-500/20 border-0"></span><span class="text-[10px] font-bold text-slate-600">暴風警戒域</span></div>
+                                    <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-red-500/30 border-2 border-red-600"></span><span class="text-[10px] font-bold text-slate-600">暴風域</span></div>
+                                    <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-amber-400/60 border border-amber-700"></span><span class="text-[10px] font-bold text-slate-600">強風域</span></div>
+                                </div>
+                            </div>
+                            ${mapSubtitle ? `<div class="text-[11px] text-slate-500 font-bold text-left pl-2">${mapSubtitle}</div>` : ''}
+                        </div>
+
+                        ${bodyHtml}
+                    </div>
+                `;
+                lucide.createIcons();
+                
+                setTimeout(() => {
+                    updateMapControlStyles();
+                    processAndDrawCanvas(true);
+                }, 50);
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = `<p class="text-center py-20 text-red-400 font-bold">データの表示処理中にエラーが発生しました。</p>`;
+            }
+        }
+
+        function zoomMap(factor) {
+            const nextScale = mapState.scale * factor;
+            if (nextScale < 0.5 || nextScale > 20) return;
+            
+            mapState.offsetX = 0 - (0 - mapState.offsetX) * factor;
+            mapState.offsetY = 0 - (0 - mapState.offsetY) * factor;
+            mapState.scale = nextScale;
+            
+            if (!mapState.pendingDraw) {
+                mapState.pendingDraw = true;
+                requestAnimationFrame(() => {
+                    drawMapCore();
+                    mapState.pendingDraw = false;
+                });
+            }
+        }
+
+        function closeDetail() {
+            const area = document.getElementById('contentArea');
+            area.classList.add('opacity-0', 'translate-y-4');
+            setTimeout(() => { area.classList.add('hidden'); document.body.style.overflow = 'auto'; }, 200);
+        }
+
+        function toggleRawDataModal() {
+            const modal = document.getElementById('rawDataModal');
+            const content = document.getElementById('rawDataContent');
+            const modalInner = document.getElementById('rawDataModalContent');
+            
+            if (modal.classList.contains('hidden')) {
+                modal.classList.remove('hidden');
+                requestAnimationFrame(() => {
+                    modal.classList.remove('opacity-0');
+                    modalInner.classList.remove('scale-95');
+                });
+
+                if (!currentItem || !currentItem.historyData || currentItem.historyData.length === 0) {
+                    content.value = "一括表示モードなど、単一の台風が選択されていないため生データは表示できません。";
+                    return;
+                }
+
+                const sortedHistory = [...currentItem.historyData].sort((a, b) => b.updated - a.updated);
+                let allXmlData = "";
+                
+                for (let hist of sortedHistory) {
+                    allXmlData += `=================================================================\n`;
+                    allXmlData += `発表日時: ${hist.updated.toLocaleString('ja-JP')}\n`;
+                    allXmlData += `URL: ${hist.link}\n`;
+                    allXmlData += `=================================================================\n\n`;
+                    allXmlData += (hist.xmlText ? hist.xmlText : "[取得エラー]") + "\n\n\n";
+                }
+                content.value = allXmlData;
+            } else {
+                closeRawDataModal();
+            }
+        }
+
+        function closeRawDataModal() {
+            const modal = document.getElementById('rawDataModal');
+            const modalInner = document.getElementById('rawDataModalContent');
+            
+            modal.classList.add('opacity-0');
+            modalInner.classList.add('scale-95');
+            
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 200);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.key === 'f' || e.key === 'F') {
+                toggleRawDataModal();
+            } else if (e.key === 'Escape') {
+                closeRawDataModal();
+            }
+        });
+
+        // 接線描画用
+        function calcOuterTangent(x1, y1, r1, x2, y2, r2) {
+            const dx = x2 - x1, dy = y2 - y1, dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= Math.abs(r2 - r1)) return null;
+            const a1 = Math.atan2(dy, dx), a2 = Math.acos((r1 - r2) / dist);
+            return [
+                [[x1 + r1 * Math.cos(a1 + a2), y1 + r1 * Math.sin(a1 + a2)], [x2 + r2 * Math.cos(a1 + a2), y2 + r2 * Math.sin(a1 + a2)]],
+                [[x1 + r1 * Math.cos(a1 - a2), y1 + r1 * Math.sin(a1 - a2)], [x2 + r2 * Math.cos(a1 - a2), y2 + r2 * Math.sin(a1 - a2)]]
+            ];
+        }
+
+        // 強風域・暴風域などのオフセットを「地球上の距離(km)と方位角(度)」として求める
+        function calculateWindAreaOffset(axesNode) {
+            if (!axesNode) return null;
+            const axes = Array.from(axesNode.querySelectorAll('Axis'));
+            if (axes.length === 0) return null;
+            
+            if (axes.length === 1 && (!axes[0].querySelector('Direction') || axes[0].querySelector('Direction').textContent === '全域')) {
+                const r = parseFloat(axes[0].querySelector('Radius[unit="km"]')?.textContent || 0);
+                if (r === 0) return null;
+                return { offsetKm: 0, offsetBearing: 0, drawRadius: r };
+            }
+            
+            let rL = 0, dirL = "", rS = 0;
+            axes.forEach(a => {
+                const r = parseFloat(a.querySelector('Radius[unit="km"]')?.textContent || 0);
+                const d = a.querySelector('Direction')?.textContent || "";
+                if (d && d !== "全域") { 
+                    if (r > rL) { rL = r; dirL = d; } else { rS = r; } 
+                } else { 
+                    if (rL === 0) rL = r; else rS = r; 
+                }
+            });
+            
+            if (rL === 0) return null;
+            if (rS === 0) rS = rL; 
+            
+            const off = (rL - rS) / 2;
+            const ang = DIRECTION_ANGLES[dirL] !== undefined ? DIRECTION_ANGLES[dirL] : 0;
+            return { offsetKm: off, offsetBearing: ang, drawRadius: (rL + rS) / 2 };
+        }
+
+        function buildMapPaths() {
+            const { minLo, maxLo, mercMinY, mercMaxY, sc } = mapConfig;
+            
+            const getBaseX = (lo) => (lo - (minLo + maxLo) / 2) * sc;
+            const getBaseY = (la) => -(lat2mercY(la) - (mercMinY + mercMaxY) / 2) * sc;
+
+            const createPath = (geo, filter) => {
+                const path = new Path2D();
+                if (!geo) return path;
+                geo.features.forEach(feat => { 
+                    if (filter && !filter(feat)) return;
+                    const co = feat.geometry.type === 'Polygon' ? [feat.geometry.coordinates] : feat.geometry.coordinates; 
+                    co.forEach(rs => rs.forEach(r => r.forEach((c, i) => { 
+                        const x = getBaseX(c[0]), y = getBaseY(c[1]); 
+                        if (i === 0) path.moveTo(x, y); else path.lineTo(x, y); 
+                    }))); 
+                });
+                return path;
+            };
+
+            cachedWorldPath = createPath(worldGeoJson, feat => feat.properties.name !== "Japan" && feat.id !== "JPN");
+            cachedJapanPath = createPath(japanGeoJson, null);
+        }
+
+        function setupCanvasEvents() {
+            if (canvasEventsInitialized) return;
+            const canvas = document.getElementById('typhoonCanvas');
+            if (!canvas) return;
+            
+            const onDown = (e) => {
+                mapState.isDragging = true;
+                mapState.lastX = e.clientX || (e.touches && e.touches[0].clientX);
+                mapState.lastY = e.clientY || (e.touches && e.touches[0].clientY);
+                canvas.style.cursor = 'grabbing';
+            };
+            
+            const onMove = (e) => {
+                if (!mapState.isDragging) return;
+                const x = e.clientX || (e.touches && e.touches[0].clientX);
+                const y = e.clientY || (e.touches && e.touches[0].clientY);
+                if (x === undefined || y === undefined) return;
+                
+                if(e.cancelable) e.preventDefault();
+                
+                mapState.offsetX += (x - mapState.lastX);
+                mapState.offsetY += (y - mapState.lastY);
+                mapState.lastX = x;
+                mapState.lastY = y;
+                
+                if (!mapState.pendingDraw) {
+                    mapState.pendingDraw = true;
+                    requestAnimationFrame(() => {
+                        drawMapCore();
+                        mapState.pendingDraw = false;
+                    });
+                }
+            };
+            
+            const onUp = () => {
+                mapState.isDragging = false;
+                canvas.style.cursor = 'crosshair';
+            };
+
+            canvas.addEventListener('mousedown', onDown);
+            canvas.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+            
+            canvas.addEventListener('touchstart', onDown, {passive: false});
+            canvas.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1) {
+                    onMove(e);
+                }
+            }, {passive: false});
+            canvas.addEventListener('touchend', onUp);
+            canvas.addEventListener('touchcancel', onUp);
+
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const zoomIntensity = 0.1;
+                const direction = e.deltaY < 0 ? 1 : -1;
+                const factor = 1 + direction * zoomIntensity;
+                
+                const nextScale = mapState.scale * factor;
+                if (nextScale < 0.5 || nextScale > 20) return;
+                
+                const mx = mouseX - (mapConfig.w / 2);
+                const my = mouseY - (mapConfig.h / 2);
+
+                mapState.offsetX = mx - (mx - mapState.offsetX) * factor;
+                mapState.offsetY = my - (my - mapState.offsetY) * factor;
+                mapState.scale = nextScale;
+                
+                if (!mapState.pendingDraw) {
+                    mapState.pendingDraw = true;
+                    requestAnimationFrame(() => {
+                        drawMapCore();
+                        mapState.pendingDraw = false;
+                    });
+                }
+            }, {passive: false});
+
+            canvasEventsInitialized = true;
+        }
+
+        function processAndDrawCanvas(resetState = false) {
+            if (!allTyphoonDataPoints || allTyphoonDataPoints.length === 0) return;
+
+            const canvas = document.getElementById('typhoonCanvas'), parent = canvas.parentElement;
+            const w = parent.clientWidth, h = parent.clientHeight;
+            
+            let targetTyphoons = currentIsAllMode ? allTyphoonDataPoints : (currentItem ? [allTyphoonDataPoints.find(t => t.item.eventId === currentItem.eventId)].filter(Boolean) : []);
+            if(targetTyphoons.length === 0 && allTyphoonDataPoints.length > 0) targetTyphoons = [allTyphoonDataPoints[0]];
+
+            let targetPointsForBounds = [];
+            if (viewSettings.mapView === "focus") {
+                targetPointsForBounds = currentDataPoints; 
+            } else {
+                targetTyphoons.forEach(t => targetPointsForBounds.push(...t.points));
+            }
+
+            let minLa = 90, maxLa = -90, minLo = 180, maxLo = -180;
+            
+            targetPointsForBounds.forEach(p => { 
+                if (p.fromDigitalTyphoon) return;
+
+                if (viewSettings.targetMode === '1h_only') {
+                    if (p.type !== 'estimate') return; 
+                } else if (viewSettings.targetMode === '24h') {
+                    if (p.type === 'estimate') return; 
+                    if ((p.type === 'forecast' || p.type === 'forecast_point') && p.hoursFromObs > 24) return;
+                } else {
+                    if (p.type === 'estimate') return;
+                }
+                
+                // 地球上の距離を簡易的に経緯度の幅に変換してバウンディングボックスを計算
+                const rDeg = Math.max(p.probR, p.gale?.drawRadius || 0, p.stormArea?.drawRadius || 0, 100) / 111; 
+                minLa = Math.min(minLa, p.lat - rDeg); 
+                maxLa = Math.max(maxLa, p.lat + rDeg); 
+                // 経度は緯度によって広がるため補正
+                const cosLat = Math.max(Math.cos(p.lat * Math.PI / 180), 0.1);
+                minLo = Math.min(minLo, p.lon - rDeg / cosLat); 
+                maxLo = Math.max(maxLo, p.lon + rDeg / cosLat); 
+            });
+            
+            if (minLa > maxLa) {
+                minLa = 15; maxLa = 50; minLo = 115; maxLo = 155;
+            }
+
+            if (viewSettings.mapView === "wide") { 
+                minLa = Math.min(minLa, 15); maxLa = Math.max(maxLa, 50); minLo = Math.min(minLo, 115); maxLo = Math.max(maxLo, 155); 
+            }
+            
+            const marg = 2.0; minLa -= marg; maxLa += marg; minLo -= marg; maxLo += marg;
+            
+            // Web Mercatorの投影範囲制限
+            minLa = Math.max(minLa, -80);
+            maxLa = Math.min(maxLa, 80);
+
+            const mercMinY = lat2mercY(minLa);
+            const mercMaxY = lat2mercY(maxLa);
+            
+            const sc = Math.min(w / (maxLo - minLo), h / (mercMaxY - mercMinY)) * 0.95;
+
+            mapConfig = { minLa, maxLa, minLo, maxLo, mercMinY, mercMaxY, sc, w, h };
+            buildMapPaths(); 
+            
+            if (resetState) {
+                mapState = { scale: 1, offsetX: 0, offsetY: 0, isDragging: false, lastX: 0, lastY: 0, pendingDraw: false };
+            }
+            
+            setupCanvasEvents();
+            drawMapCore();
+        }
+
+        function drawMapCore() {
+            const { minLa, maxLa, minLo, maxLo, mercMinY, mercMaxY, sc, w, h } = mapConfig;
+            const { scale, offsetX, offsetY } = mapState;
+
+            const canvas = document.getElementById('typhoonCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            let targetTyphoons = currentIsAllMode ? allTyphoonDataPoints : (currentItem ? [allTyphoonDataPoints.find(t => t.item.eventId === currentItem.eventId)].filter(Boolean) : []);
+            if(targetTyphoons.length === 0 && allTyphoonDataPoints.length > 0) targetTyphoons = [allTyphoonDataPoints[0]];
+
+            canvas.width = w * 2; canvas.height = h * 2; ctx.scale(2, 2);
+            ctx.fillStyle = '#5dade2'; ctx.fillRect(0, 0, w, h);
+
+            // 地球上の座標からメルカトル投影後のCanvas座標へ変換
+            const getX = (lo) => (w / 2) + (lo - (minLo + maxLo) / 2) * sc * scale + offsetX;
+            const getY = (la) => (h / 2) - (lat2mercY(la) - (mercMinY + mercMaxY) / 2) * sc * scale + offsetY;
+            
+            // 地球上の半径(km)からメルカトル図法上のピクセル半径へ変換
+            // メルカトル図法では小円は真円として投影され、高緯度ほど大きく描かれる
+            const getR = (km, lat) => {
+                const cosLat = Math.max(Math.cos(lat * Math.PI / 180), 0.1);
+                return (km / 111) * (1 / cosLat) * sc * scale;
+            };
+
+            // 地図描画
+            ctx.save();
+            ctx.translate((w / 2) + offsetX, (h / 2) + offsetY);
+            ctx.scale(scale, scale);
+            
+            if (cachedWorldPath) {
+                ctx.fillStyle = '#9ade7b';
+                ctx.fill(cachedWorldPath);
+                ctx.strokeStyle = '#7fb360';
+                ctx.lineWidth = 0.5 / scale;
+                ctx.stroke(cachedWorldPath);
+            }
+            if (cachedJapanPath) {
+                ctx.fillStyle = '#9ade7b';
+                ctx.fill(cachedJapanPath);
+                ctx.strokeStyle = '#6ba04b';
+                ctx.lineWidth = 0.5 / scale;
+                ctx.stroke(cachedJapanPath);
+            }
+            ctx.restore();
+
+            // グリッド線
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'; ctx.lineWidth = 0.5;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; ctx.font = '10px sans-serif';
+            const interval = scale > 2.5 ? 1 : (scale > 1.2 ? 2 : 5);
+            const loStart = Math.floor(minLo / interval) * interval - interval * 10;
+            const loEnd = Math.ceil(maxLo / interval) * interval + interval * 10;
+            for (let lo = loStart; lo <= loEnd; lo += interval) {
+                const x = getX(lo); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+                ctx.fillText(`${lo}°E`, x + 4, h - 8);
+            }
+            const laStart = Math.floor(minLa / interval) * interval - interval * 10;
+            const laEnd = Math.ceil(maxLa / interval) * interval + interval * 10;
+            for (let la = laStart; la <= laEnd; la += interval) {
+                const y = getY(la); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+                ctx.fillText(`${la}°N`, 8, y - 4);
+            }
+
+            if (viewSettings.targetMode === '1h_only') {
+                targetTyphoons.forEach(tData => {
+                    tData.points.forEach(p => {
+                        if (p.type !== 'estimate') return;
+                        
+                        const x = getX(p.lon), y = getY(p.lat);
+                        
+                        if (p.gale) {
+                            const center = getCircleCenter(p, p.gale);
+                            const gx = getX(center.lon), gy = getY(center.lat), r = getR(p.gale.drawRadius, center.lat);
+                            ctx.beginPath(); ctx.arc(gx, gy, r, 0, Math.PI * 2); 
+                            ctx.fillStyle = 'rgba(251, 191, 36, 0.5)'; ctx.fill(); 
+                            ctx.strokeStyle = '#b45309'; ctx.lineWidth = 1.2; ctx.stroke();
+                        }
+                        if (p.stormArea && p.stormArea.drawRadius > 0) {
+                            const center = getCircleCenter(p, p.stormArea);
+                            const sx = getX(center.lon), sy = getY(center.lat), r = getR(p.stormArea.drawRadius, center.lat);
+                            ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); 
+                            ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; ctx.fill(); 
+                            ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 1.5; ctx.stroke();
+                        }
+
+                        ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 2; 
+                        ctx.beginPath(); ctx.moveTo(x-4,y-4); ctx.lineTo(x+4,y+4); ctx.stroke(); 
+                        ctx.beginPath(); ctx.moveTo(x+4,y-4); ctx.lineTo(x-4,y+4); ctx.stroke();
+                        
+                        if (p.time) {
+                            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 10px sans-serif'; ctx.shadowColor = 'black'; ctx.shadowBlur = 3;
+                            let timeStr = `${p.time.getDate()}日${p.time.getHours()}時(推定)`;
+                            if (targetTyphoons.length > 1) {
+                                // 1時間後推定のラベルは実況ではないが、一応名前を付ける
+                                let prefix = tData.item.infoClass.label;
+                                if (tData.item.typhoonNum) {
+                                    prefix = `台風${String(tData.item.typhoonNum).padStart(2, '0')}号`;
+                                }
+                                timeStr = `${prefix} ${timeStr}`;
+                            }
+                            ctx.fillText(timeStr, x + 6, y - 6); ctx.shadowBlur = 0;
+                        }
+                    });
+                });
+                return;
+            }
+
+            // 暴風警戒域（暴風域の予報）と接線の描画
+            targetTyphoons.forEach(tData => {
+                const dataPoints = tData.points;
+                const activePoints = dataPoints.filter(p => {
+                    if (p.type === 'past' || p.type === 'estimate') return false;
+                    if (viewSettings.targetMode === '24h' && p.hoursFromObs > 24) return false;
+                    if (!viewSettings.show3h) {
+                        if (p.type !== 'current' && p.hoursFromObs <= 24 && p.hoursFromObs % 12 !== 0) return false;
+                    }
+                    return true;
+                }).sort((a, b) => a.time - b.time);
+
+                const stormEnvs = activePoints.filter(p => p.stormArea && p.stormArea.drawRadius > 0);
+
+                if (stormEnvs.length > 0) {
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; 
+                    ctx.strokeStyle = '#dc2626'; 
+                    ctx.lineWidth = 1.0;
+                    ctx.beginPath();
+                    
+                    if (stormEnvs.length > 1) {
+                        for (let i = 0; i < stormEnvs.length - 1; i++) {
+                            const c1 = getCircleCenter(stormEnvs[i], stormEnvs[i].stormArea);
+                            const c2 = getCircleCenter(stormEnvs[i+1], stormEnvs[i+1].stormArea);
+                            const r1 = getR(stormEnvs[i].stormArea.drawRadius, c1.lat);
+                            const r2 = getR(stormEnvs[i+1].stormArea.drawRadius, c2.lat);
+                            
+                            const t = calcOuterTangent(
+                                getX(c1.lon), getY(c1.lat), r1, 
+                                getX(c2.lon), getY(c2.lat), r2
+                            );
+                            if (t) { 
+                                ctx.moveTo(t[1][0][0], t[1][0][1]); 
+                                ctx.lineTo(t[1][1][0], t[1][1][1]); 
+                                ctx.lineTo(t[0][1][0], t[0][1][1]); 
+                                ctx.lineTo(t[0][0][0], t[0][0][1]); 
+                                ctx.closePath(); 
+                            }
+                        }
+                    }
+                    stormEnvs.forEach(p => { 
+                        const c = getCircleCenter(p, p.stormArea);
+                        const x = getX(c.lon), y = getY(c.lat), r = getR(p.stormArea.drawRadius, c.lat); 
+                        if (r > 0) {
+                            ctx.moveTo(x + r, y); 
+                            ctx.arc(x, y, r, 0, Math.PI * 2); 
+                        }
+                    });
+                    ctx.fill();
+                }
+            });
+
+            // 単体の強風域・暴風域（最新実況のみ赤い枠線付きで描画）
+            targetTyphoons.forEach(tData => {
+                const dataPoints = tData.points;
+                dataPoints.forEach(p => {
+                    const x = getX(p.lon), y = getY(p.lat);
+                    if (p.type === 'current' || p.type === 'forecast_point') {
+                        if (p.gale) {
+                            const center = getCircleCenter(p, p.gale);
+                            const gx = getX(center.lon), gy = getY(center.lat), r = getR(p.gale.drawRadius, center.lat);
+                            ctx.beginPath(); ctx.arc(gx, gy, r, 0, Math.PI * 2); 
+                            ctx.fillStyle = 'rgba(251, 191, 36, 0.4)';
+                            ctx.fill(); 
+                            ctx.strokeStyle = '#b45309';
+                            ctx.lineWidth = 1.2; 
+                            ctx.stroke();
+                        }
+                        if (p.stormArea && p.stormArea.drawRadius > 0 && p.type === 'current') {
+                            const center = getCircleCenter(p, p.stormArea);
+                            const sx = getX(center.lon), sy = getY(center.lat), r = getR(p.stormArea.drawRadius, center.lat);
+                            ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); 
+                            ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'; 
+                            ctx.fill(); 
+                            ctx.strokeStyle = '#dc2626'; 
+                            ctx.lineWidth = 1.5; 
+                            ctx.stroke();
+                        }
+                    }
+                });
+            });
+
+            // 予報円接線
+            targetTyphoons.forEach(tData => {
+                const dataPoints = tData.points;
+                const activePoints = dataPoints.filter(p => {
+                    if (p.type === 'past' || p.type === 'estimate') return false;
+                    if (viewSettings.targetMode === '24h' && p.hoursFromObs > 24) return false;
+                    if (!viewSettings.show3h) {
+                        if (p.type !== 'current' && p.hoursFromObs <= 24 && p.hoursFromObs % 12 !== 0) return false;
+                    }
+                    return true;
+                }).sort((a, b) => a.time - b.time);
+
+                const probEnvs = activePoints.filter(p => p.type === 'current' || p.probR > 0);
+
+                if (probEnvs.length > 1) {
+                    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.2; ctx.setLineDash([]); 
+                    for (let i = 0; i < probEnvs.length - 1; i++) {
+                        const r1 = Math.max(getR(probEnvs[i].probR, probEnvs[i].lat), 1);
+                        const r2 = Math.max(getR(probEnvs[i+1].probR, probEnvs[i+1].lat), 1);
+                        
+                        const t = calcOuterTangent(
+                            getX(probEnvs[i].lon), getY(probEnvs[i].lat), r1, 
+                            getX(probEnvs[i+1].lon), getY(probEnvs[i+1].lat), r2
+                        );
+                        if (t) { 
+                            ctx.beginPath(); ctx.moveTo(t[0][0][0], t[0][0][1]); ctx.lineTo(t[0][1][0], t[0][1][1]); ctx.stroke(); 
+                            ctx.beginPath(); ctx.moveTo(t[1][0][0], t[1][0][1]); ctx.lineTo(t[1][1][0], t[1][1][1]); ctx.stroke(); 
+                        }
+                    }
+                }
+            });
+
+            // 実況・過去の線
+            targetTyphoons.forEach(tData => {
+                const dataPoints = tData.points;
+                const pastPoints = dataPoints.filter(p => p.type === 'past' || p.type === 'current').sort((a, b) => a.time - b.time);
+                if (pastPoints.length > 1) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#1e40af';
+                    ctx.lineWidth = 3.0;
+                    ctx.setLineDash([]); 
+                    
+                    pastPoints.forEach((p, i) => {
+                        const x = getX(p.lon), y = getY(p.lat);
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    ctx.stroke();
+                }
+            });
+
+            // 予報の線
+            targetTyphoons.forEach(tData => {
+                const dataPoints = tData.points;
+                const forecastPoints = dataPoints.filter(p => {
+                    if (p.type !== 'current' && p.type !== 'forecast' && p.type !== 'forecast_point') return false;
+                    if (viewSettings.targetMode === '24h' && p.hoursFromObs > 24) return false;
+                    if (!viewSettings.show3h) {
+                        if (p.type !== 'current' && p.hoursFromObs <= 24 && p.hoursFromObs % 12 !== 0) return false;
+                    }
+                    return true;
+                }).sort((a, b) => a.time - b.time);
+
+                if (forecastPoints.length > 1) {
+                    ctx.beginPath();
+                    ctx.setLineDash([4, 4]);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.5;
+                    forecastPoints.forEach((p, i) => {
+                        const x = getX(p.lon), y = getY(p.lat);
+                        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    });
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            });
+
+            // 点とラベル
+            targetTyphoons.forEach(tData => {
+                const dataPoints = tData.points;
+                dataPoints.forEach(p => {
+                    if (p.type === 'estimate') return;
+                    if (viewSettings.targetMode === '24h' && p.hoursFromObs > 24) return;
+                    if (!viewSettings.show3h) {
+                        if (p.type !== 'current' && p.hoursFromObs <= 24 && p.hoursFromObs % 12 !== 0) return;
+                    }
+
+                    const x = getX(p.lon), y = getY(p.lat);
+                    
+                    if (p.type === 'current' || p.type === 'forecast_point') {
+                        ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x-4,y-4); ctx.lineTo(x+4,y+4); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x+4,y-4); ctx.lineTo(x-4,y+4); ctx.stroke();
+                    } else if (p.type === 'forecast') {
+                        const r = getR(p.probR, p.lat);
+                        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.setLineDash([4, 4]); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+                        ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fillStyle = '#dc2626'; ctx.fill();
+                    } else if (p.type === 'past' && p.fromDigitalTyphoon) {
+                        ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fillStyle = '#1e40af'; ctx.fill();
+                    }
+                    
+                    if (p.time && p.type !== 'past') {
+                        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 10px sans-serif'; ctx.shadowColor = 'black'; ctx.shadowBlur = 3;
+                        
+                        let timeStr = `${p.time.getDate()}日${p.time.getHours()}時`;
+                        if (p.intensity && p.intensity !== 'ー') {
+                            timeStr += `[${p.intensity}]`;
+                        }
+                        
+                        if (targetTyphoons.length > 1) {
+                            if (p.type === 'current') {
+                                let prefix = tData.item.infoClass.label;
+                                if (tData.item.typhoonNum) {
+                                    prefix = `台風${String(tData.item.typhoonNum).padStart(2, '0')}号`;
+                                }
+                                timeStr = `${prefix} ${timeStr}`;
+                            }
+                        }
+                        
+                        ctx.fillText(timeStr, x + 6, y - 6); ctx.shadowBlur = 0;
+                    }
+                });
+            });
+        }
+
+        window.onload = () => loadMaps().then(() => fetchTyphoonFeed());
+    </script>
+</body>
+</html>

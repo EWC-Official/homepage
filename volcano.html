@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EWC 火山情報マップ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght=400;700;900&display=swap');
+        
+        /* iframe(Googleサイト等)埋め込み環境に対応するための設定 */
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            position: fixed; /* ズレ補正: 親ページのスクロール干渉を防ぐ */
+        }
+
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 地図エリア（海の背景色を水色に設定） */
+        #map {
+            height: 40vh;
+            min-height: 200px; /* 極端に潰れるのを防ぐ */
+            width: 100%;
+            background-color: #e0f2fe; /* 海の色: Sky 100 */
+            border-bottom: 2px solid #e2e8f0;
+            z-index: 1;
+        }
+        @media (min-width: 768px) {
+            #map { height: 50vh; min-height: 250px; }
+        }
+
+        .v-table {
+            font-size: 11px;
+            line-height: 1.2;
+        }
+
+        .level-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            font-weight: 900;
+            color: white;
+            font-size: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+
+        .sticky-header th {
+            position: sticky;
+            top: 0;
+            background: #f8fafc;
+            z-index: 10;
+        }
+
+        .active-row {
+            background-color: #e0f2fe !important;
+        }
+        .active-report {
+            border-color: #3b82f6 !important;
+            background-color: #eff6ff !important;
+        }
+
+        /* Leaflet ポップアップのカスタマイズ */
+        .leaflet-popup-content-wrapper {
+            border-radius: 8px;
+            padding: 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .leaflet-popup-content {
+            margin: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            line-height: 1.2;
+        }
+
+        /* カスタムレンジスライダー */
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input[type=range]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Leafletでの斜線塗りつぶし用SVGパターン定義 -->
+    <svg style="width:0; height:0; position:absolute;" aria-hidden="true">
+        <defs>
+            <pattern id="diagonal-hatch" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#dc2626" stroke-width="2" />
+            </pattern>
+        </defs>
+    </svg>
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 shadow-sm z-50 shrink-0">
+        <div class="container mx-auto px-3 h-12 flex items-center justify-between">
+            <div class="flex flex-col">
+                <h1 class="text-sm font-black tracking-tighter text-blue-900">EWC 火山情報マップ</h1>
+                <div id="header-update-time" class="text-[9px] text-slate-400 font-bold">更新: 情報取得中...</div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <div id="loading-indicator" class="hidden text-blue-500 mr-2">
+                    <i class="fas fa-sync-alt fa-spin text-xs"></i>
+                </div>
+                <div class="relative flex items-center">
+                    <i class="fas fa-search absolute left-2 text-slate-400 text-[10px]"></i>
+                    <input type="text" id="search-input" oninput="filterVolcanoes()" placeholder="火山名..." 
+                           class="pl-6 pr-2 py-1.5 bg-slate-100 border border-slate-200 rounded text-xs w-32 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 placeholder-slate-400 font-bold">
+                </div>
+                <button onclick="fetchAllVolcanoFeeds()" class="p-1.5 hover:bg-slate-100 text-blue-500 rounded-full transition-colors border border-slate-200" title="最新情報に更新">
+                    <i class="fas fa-redo text-sm"></i>
+                </button>
+                <button onclick="resetMapView()" class="p-1.5 hover:bg-slate-100 text-slate-500 rounded-full transition-colors border border-slate-200" title="全国表示">
+                    <i class="fas fa-home text-sm"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Map Section -->
+    <div class="relative z-0 shrink-0">
+        <div id="map"></div>
+        
+        <!-- 降灰・噴石 凡例 -->
+        <div id="legend-ash" class="hidden absolute bottom-6 left-2 md:left-4 z-[1000] bg-white/90 backdrop-blur rounded-lg p-2.5 shadow-md border border-slate-200 text-[10px] font-black flex flex-col gap-1.5 pointer-events-none">
+            <span class="text-slate-500 border-b border-slate-200 pb-1 mb-0.5">降灰・噴石 予想</span>
+            <span class="flex items-center"><span class="w-3 h-3 bg-[#ef4444] opacity-60 mr-1.5 border border-[#dc2626]"></span>多量</span>
+            <span class="flex items-center"><span class="w-3 h-3 bg-[#eab308] opacity-60 mr-1.5 border border-[#ca8a04]"></span>やや多量</span>
+            <span class="flex items-center"><span class="w-3 h-3 bg-[#94a3b8] opacity-50 mr-1.5 border border-[#64748b]"></span>少量</span>
+            <span class="flex items-center">
+                <span class="w-3 h-3 mr-1.5 border-2 border-dashed border-[#dc2626]" style="background: repeating-linear-gradient(45deg, transparent, transparent 2px, #dc2626 2px, #dc2626 3px);"></span>小さな噴石
+            </span>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-hidden flex bg-white relative">
+        
+        <!-- 左側：火山リスト -->
+        <div id="volcano-list-container" class="w-full md:w-2/5 border-r border-slate-200 flex flex-col h-full z-10 bg-white">
+            <!-- Legend -->
+            <div class="px-2 py-2.5 bg-slate-50 border-b flex space-x-4 items-center text-[9px] font-black overflow-x-auto whitespace-nowrap custom-scrollbar shrink-0">
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-purple-600 mr-1 shadow-sm"></span>避難(5)</span>
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-pink-500 mr-1 shadow-sm"></span>高齢者等避難(4)</span>
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-red-600 mr-1 shadow-sm"></span>入山規制(3)</span>
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-orange-500 mr-1 shadow-sm"></span>火口周辺(2)</span>
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-blue-500 mr-1 shadow-sm"></span>留意(1)</span>
+            </div>
+
+            <!-- Table View -->
+            <div class="flex-1 overflow-hidden relative">
+                <div class="overflow-x-auto overflow-y-auto custom-scrollbar h-full absolute inset-0">
+                    <table class="w-full text-left border-collapse v-table">
+                        <thead class="sticky-header shadow-sm border-b border-slate-100">
+                            <tr class="text-slate-400 font-black uppercase tracking-tighter">
+                                <th class="px-2 py-2.5 w-6 text-center">Lv</th>
+                                <th class="px-2 py-2.5 w-10">地域</th>
+                                <th class="px-2 py-2.5 w-24">火山名</th>
+                                <th class="px-2 py-2.5">状況・警戒事項</th>
+                                <th class="px-1 py-2.5 w-8 text-center" title="関連情報あり">情報</th>
+                            </tr>
+                        </thead>
+                        <tbody id="volcano-tbody" class="divide-y divide-slate-50 font-bold">
+                            <!-- JSで動的生成 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側：関連情報（XML） -->
+        <div id="volcano-info-container" class="w-full md:w-3/5 bg-slate-50 hidden md:flex flex-col h-full relative border-slate-200">
+            <div class="px-4 py-2 bg-slate-100 border-b border-slate-200 shrink-0 flex items-center">
+                <!-- モバイル用戻るボタン -->
+                <button onclick="showListMobile()" class="md:hidden mr-3 w-7 h-7 flex items-center justify-center bg-white rounded-full shadow-sm text-slate-500 hover:text-blue-600 border border-slate-200 transition-colors">
+                    <i class="fas fa-chevron-left text-xs"></i>
+                </button>
+                <h3 class="text-xs font-black text-slate-500 uppercase tracking-widest"><i class="fas fa-file-alt mr-1"></i> 火山関連情報</h3>
+            </div>
+            
+            <div id="volcano-info-empty" class="flex-1 flex flex-col items-center justify-center p-6 text-slate-400">
+                <i class="fas fa-hand-pointer text-3xl mb-3 text-slate-300"></i>
+                <p class="font-bold text-xs text-center">リストから火山を選択すると、<br>最新の関連情報と降灰範囲を自動取得します。</p>
+            </div>
+
+            <div id="volcano-info-panel" class="flex-1 overflow-y-auto custom-scrollbar p-4 hidden">
+                <!-- 選択された火山の名前 -->
+                <div class="flex items-center gap-3 mb-4 pb-3 border-b border-slate-200">
+                    <span id="selected-volcano-badge" class="level-badge shadow-sm"></span>
+                    <h2 id="selected-volcano-name" class="text-lg font-black text-slate-800"></h2>
+                </div>
+                
+                <!-- 関連情報のリスト -->
+                <div id="volcano-reports-list" class="space-y-3">
+                    <!-- JSで動的生成 -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const PREF_GEOJSON_URL = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
+
+        // 気象庁防災情報XMLのフィードURL群
+        const FEED_URLS = [
+            "https://www.data.jma.go.jp/developer/xml/feed/volcano.xml", // 火山フィード
+            "https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml",   // 地震火山フィード
+            "https://www.data.jma.go.jp/developer/xml/feed/extra.xml"    // 高頻度・随時フィード
+        ];
+
+        // 応答の早いプロキシを優先度順に配置
+        const PROXIES = [
+            "https://corsproxy.io/?",
+            "https://api.allorigins.win/raw?url=",
+            "https://thingproxy.freeboard.io/fetch/"
+        ];
+
+        // 元データ
+        const rawVolcanoData = [
+            {reg: "北海道", name: "アトサヌプリ", info: "活火山であることに留意", lat: 43.60, lng: 144.44},
+            {reg: "北海道", name: "雌阿寒岳", info: "火口周辺規制", lat: 43.39, lng: 144.01},
+            {reg: "北海道", name: "大雪山", info: "活火山であることに留意", lat: 43.66, lng: 142.85},
+            {reg: "北海道", name: "十勝岳", info: "火口周辺規制", lat: 43.42, lng: 142.69},
+            {reg: "北海道", name: "樽前山", info: "活火山であることに留意", lat: 42.69, lng: 141.38},
+            {reg: "北海道", name: "倶多楽", info: "活火山であることに留意", lat: 42.49, lng: 141.18},
+            {reg: "北海道", name: "有珠山", info: "活火山であることに留意", lat: 42.54, lng: 140.84},
+            {reg: "北海道", name: "北海道駒ヶ岳", info: "活火山であることに留意", lat: 42.06, lng: 140.68},
+            {reg: "北海道", name: "恵山", info: "活火山であることに留意", lat: 41.80, lng: 141.17},
+            {reg: "東北", name: "岩木山", info: "活火山であることに留意", lat: 40.66, lng: 140.30},
+            {reg: "東北", name: "八甲田山", info: "活火山であることに留意", lat: 40.66, lng: 140.88},
+            {reg: "東北", name: "十和田", info: "活火山であることに留意", lat: 40.43, lng: 140.88},
+            {reg: "東北", name: "秋田焼山", info: "活火山であることに留意", lat: 39.96, lng: 140.76},
+            {reg: "東北", name: "岩手山", info: "火口周辺規制", lat: 39.85, lng: 141.00},
+            {reg: "東北", name: "秋田駒ヶ岳", info: "活火山であることに留意", lat: 39.76, lng: 140.80},
+            {reg: "東北", name: "鳥海山", info: "活火山であることに留意", lat: 39.10, lng: 140.05},
+            {reg: "東北", name: "栗駒山", info: "活火山であることに留意", lat: 38.96, lng: 140.79},
+            {reg: "東北", name: "蔵王山", info: "活火山であることに留意", lat: 38.14, lng: 140.45},
+            {reg: "東北", name: "吾妻山", info: "活火山であることに留意", lat: 37.74, lng: 140.24},
+            {reg: "東北", name: "安達太良山", info: "活火山であることに留意", lat: 37.62, lng: 140.29},
+            {reg: "東北", name: "磐梯山", info: "活火山であることに留意", lat: 37.60, lng: 140.07},
+            {reg: "関東・中部", name: "那須岳", info: "活火山であることに留意", lat: 37.12, lng: 139.97},
+            {reg: "関東・中部", name: "日光白根山", info: "活火山であることに留意", lat: 36.80, lng: 139.38},
+            {reg: "関東・中部", name: "草津白根山", info: "活火山であることに留意", lat: 36.65, lng: 138.53},
+            {reg: "関東・中部", name: "浅間山", info: "活火山であることに留意", lat: 36.41, lng: 138.52},
+            {reg: "関東・中部", name: "新潟焼山", info: "活火山であることに留意", lat: 36.92, lng: 138.04},
+            {reg: "関東・中部", name: "弥陀ヶ原", info: "活火山であることに留意", lat: 36.60, lng: 137.61},
+            {reg: "関東・中部", name: "焼岳", info: "活火山であることに留意", lat: 36.23, lng: 137.59},
+            {reg: "関東・中部", name: "乗鞍岳", info: "活火山であることに留意", lat: 36.11, lng: 137.55},
+            {reg: "関東・中部", name: "御嶽山", info: "活火山であることに留意", lat: 35.89, lng: 137.48},
+            {reg: "関東・中部", name: "白山", info: "活火山であることに留意", lat: 36.16, lng: 136.77},
+            {reg: "関東・中部", name: "富士山", info: "活火山であることに留意", lat: 35.36, lng: 138.73},
+            {reg: "関東・中部", name: "箱根山", info: "活火山であることに留意", lat: 35.22, lng: 139.02},
+            {reg: "関東・中部", name: "伊豆東部火山群", info: "活火山であることに留意", lat: 34.92, lng: 139.11},
+            {reg: "伊豆諸島", name: "伊豆大島", info: "活火山であることに留意", lat: 34.72, lng: 139.39},
+            {reg: "伊豆諸島", name: "新島", info: "活火山であることに留意", lat: 34.37, lng: 139.26},
+            {reg: "伊豆諸島", name: "神津島", info: "活火山であることに留意", lat: 34.22, lng: 139.16},
+            {reg: "伊豆諸島", name: "三宅島", info: "活火山であることに留意", lat: 34.08, lng: 139.53},
+            {reg: "伊豆諸島", name: "八丈島", info: "活火山であることに留意", lat: 33.13, lng: 139.76},
+            {reg: "伊豆諸島", name: "青ヶ島", info: "活火山であることに留意", lat: 32.45, lng: 139.76},
+            {reg: "伊豆諸島", name: "ベヨネース列岩", info: "周辺海域警戒", lat: 31.89, lng: 139.91},
+            {reg: "伊豆諸島", name: "須美寿島", info: "周辺海域警戒", lat: 31.44, lng: 140.05},
+            {reg: "小笠原", name: "西之島", info: "入山危険", lat: 27.25, lng: 140.87},
+            {reg: "小笠原", name: "海徳海山", info: "活火山であることに留意", lat: 26.13, lng: 141.10},
+            {reg: "小笠原", name: "噴火浅根", info: "活火山であることに留意", lat: 25.47, lng: 141.24},
+            {reg: "小笠原", name: "硫黄島", info: "火口周辺規制", lat: 24.75, lng: 141.29},
+            {reg: "小笠原", name: "福徳岡ノ場", info: "周辺海域警戒", lat: 24.29, lng: 141.48},
+            {reg: "関東・中部", name: "男体山", info: "活火山であることに留意", lat: 36.77, lng: 139.49},
+            {reg: "関東・中部", name: "草津白根山(湯釜)", info: "活火山であることに留意", lat: 36.65, lng: 138.53},
+            {reg: "関東・中部", name: "草津白根山(本白根)", info: "活火山であることに留意", lat: 36.63, lng: 138.53},
+            {reg: "九州", name: "九重山", info: "活火山であることに留意", lat: 33.08, lng: 131.25},
+            {reg: "九州", name: "阿蘇山", info: "火口周辺規制", lat: 32.88, lng: 131.10},
+            {reg: "九州", name: "雲仙岳", info: "活火山であることに留意", lat: 32.76, lng: 130.30},
+            {reg: "九州", name: "霧島山", info: "活火山であることに留意", lat: 31.93, lng: 130.86},
+            {reg: "九州", name: "桜島", info: "入山規制", lat: 31.59, lng: 130.66},
+            {reg: "九州", name: "薩摩硫黄島", info: "火口周辺規制", lat: 30.79, lng: 130.31},
+            {reg: "九州", name: "口永良部島", info: "活火山であることに留意", lat: 30.44, lng: 130.22},
+            {reg: "九州", name: "諏訪之瀬島", info: "火口周辺規制", lat: 29.64, lng: 129.72},
+            {reg: "九州", name: "鶴見岳・伽藍岳", info: "活火山であることに留意", lat: 33.29, lng: 131.43},
+            {reg: "九州", name: "霧島山(御鉢)", info: "活火山であることに留意", lat: 31.89, lng: 130.89},
+            {reg: "九州", name: "霧島山(新燃岳)", info: "火口周辺規制", lat: 31.91, lng: 130.88},
+            {reg: "九州", name: "霧島山(えびの)", info: "活火山であることに留意", lat: 31.95, lng: 130.85},
+            {reg: "九州", name: "霧島山(大幡池)", info: "活火山であることに留意", lat: 31.94, lng: 130.91}
+        ];
+
+        let map, currentPolygonsLayer;
+
+        // --- モバイル表示用の画面切り替え処理 ---
+        function showListMobile() {
+            if (window.innerWidth < 768) {
+                document.getElementById('volcano-list-container').classList.remove('hidden');
+                document.getElementById('volcano-list-container').classList.add('flex');
+                document.getElementById('volcano-info-container').classList.add('hidden');
+                document.getElementById('volcano-info-container').classList.remove('flex');
+            }
+        }
+
+        // リサイズ時のレイアウト調整
+        window.addEventListener('resize', () => {
+            if (window.innerWidth >= 768) {
+                document.getElementById('volcano-list-container').classList.remove('hidden');
+                document.getElementById('volcano-list-container').classList.add('flex');
+                document.getElementById('volcano-info-container').classList.remove('hidden');
+                document.getElementById('volcano-info-container').classList.add('flex');
+            } else {
+                if (!document.getElementById('volcano-info-panel').classList.contains('hidden')) {
+                    document.getElementById('volcano-list-container').classList.add('hidden');
+                    document.getElementById('volcano-list-container').classList.remove('flex');
+                    document.getElementById('volcano-info-container').classList.remove('hidden');
+                    document.getElementById('volcano-info-container').classList.add('flex');
+                } else {
+                    document.getElementById('volcano-info-container').classList.add('hidden');
+                    document.getElementById('volcano-info-container').classList.remove('flex');
+                    document.getElementById('volcano-list-container').classList.remove('hidden');
+                    document.getElementById('volcano-list-container').classList.add('flex');
+                }
+            }
+        });
+
+        // 時間表記のフォーマット (例: 18日23:30)
+        function formatTimeOnly(isoString) {
+            if (!isoString) return "";
+            const d = new Date(isoString);
+            if (isNaN(d)) return isoString;
+            return `${String(d.getDate()).padStart(2,'0')}日${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+
+        // タイムアウト付きフェッチ関数
+        async function fetchWithTimeout(url, options = {}, timeout = 4000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            try {
+                const response = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(id);
+                return response;
+            } catch (e) {
+                clearTimeout(id);
+                throw e;
+            }
+        }
+
+        // 最も応答の早いプロキシから非同期でデータを取得する高速化関数
+        async function fetchWithFastestProxy(url, timeout = 5000) {
+            const cacheBusterUrl = url + (url.includes('?') ? '&' : '?') + "_=" + Date.now();
+            
+            const promises = PROXIES.map(proxy => {
+                const proxyUrl = proxy + encodeURIComponent(cacheBusterUrl);
+                return fetchWithTimeout(proxyUrl, {}, timeout).then(res => {
+                    if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+                    return res;
+                });
+            });
+            
+            try {
+                return await Promise.any(promises);
+            } catch (e) {
+                try {
+                    return await fetchWithTimeout(cacheBusterUrl, {}, timeout);
+                } catch (directError) {
+                    throw new Error("All proxies and direct fetch failed");
+                }
+            }
+        }
+
+        // スプレッドシートから警戒事項データをロードして rawVolcanoData を上書き
+        async function fetchSpreadsheetData() {
+            const sheetId = '1DZbmmqAN0C0SbSAtnKDegPkjPPnxUyiPukAg3D9l0oQ';
+            const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+            
+            try {
+                let response;
+                try {
+                    response = await fetchWithTimeout(csvUrl, {}, 3000);
+                } catch (e) {
+                    console.log("スプレッドシートの直接取得に失敗したため、最速プロキシに切り替えます:", e.message);
+                    response = await fetchWithFastestProxy(csvUrl);
+                }
+
+                const csvText = await response.text();
+                const lines = csvText.split(/\r\n|\n/);
+                const newDataMap = {};
+                
+                lines.forEach(line => {
+                    const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                    if (cols.length >= 4) {
+                        const volcanoName = cols[1].replace(/^"|"$/g, '').trim(); // B列 (index 1)
+                        const info = cols[3].replace(/^"|"$/g, '').trim();       // D列 (index 3)
+                        
+                        if (volcanoName && info) {
+                            // 全角かっこを半角に正規化して揺れを吸収
+                            const normalizedName = volcanoName.replace(/（/g, '(').replace(/）/g, ')');
+                            newDataMap[normalizedName] = info;
+                        }
+                    }
+                });
+
+                // スプレッドシートのデータで既存情報を上書き
+                let updatedCount = 0;
+                rawVolcanoData.forEach(v => {
+                    const normalizedVName = v.name.replace(/（/g, '(').replace(/）/g, ')');
+                    let matchedInfo = null;
+
+                    // 1. 完全一致判定
+                    if (newDataMap[normalizedVName]) {
+                        matchedInfo = newDataMap[normalizedVName];
+                    } else {
+                        // 2. 表記揺れ（部分一致や特殊ルール）を曖昧マッチで解決
+                        const getKeywords = (name) => {
+                            return name.replace(/[()（）]/g, ' ').split(/\s+/).filter(Boolean);
+                        };
+                        const vKeywords = getKeywords(v.name);
+
+                        for (const sheetName in newDataMap) {
+                            // 特定の火山における特殊な表記ズレのマッピングルール
+                            const isKusatsuYugama = v.name.includes("湯釜") && sheetName.includes("湯釜");
+                            const isKusatsuMotoshirane = v.name.includes("本白根") && sheetName.includes("本白根");
+                            const isKirishimaEbino = v.name.includes("えびの") && sheetName.includes("えびの");
+
+                            if (isKusatsuYugama || isKusatsuMotoshirane || isKirishimaEbino) {
+                                matchedInfo = newDataMap[sheetName];
+                                break;
+                            }
+
+                            // キーワードのすべての部分一致を検索
+                            const matchAll = vKeywords.length > 0 && vKeywords.every(keyword => {
+                                return sheetName.includes(keyword) || keyword.includes(sheetName);
+                            });
+
+                            if (matchAll) {
+                                matchedInfo = newDataMap[sheetName];
+                                break;
+                            }
+                        }
+                    }
+
+                    if (matchedInfo) {
+                        v.info = matchedInfo;
+                        updatedCount++;
+                    }
+                });
+                console.log(`スプレッドシートから表記揺れを解決し、${updatedCount} 件 of 警戒事項を反映しました`);
+            } catch (e) {
+                console.warn("スプレッドシートの取得に失敗したため、初期（フォールバック）データを使用します:", e.message);
+            }
+        }
+
+        // リアルタイムに気象庁のフィードを取得
+        async function fetchAllVolcanoFeeds() {
+            document.getElementById('loading-indicator').classList.remove('hidden');
+            rawVolcanoData.forEach(v => { v.reports = []; });
+
+            try {
+                const feedPromises = FEED_URLS.map(url => 
+                    fetchWithFastestProxy(url, 6000)
+                        .then(r => r.text())
+                        .catch(e => {
+                            console.warn(`フィード取得エラー (${url}):`, e.message);
+                            return null;
+                        })
+                );
+                
+                const feedTexts = await Promise.all(feedPromises);
+                const seenIds = new Set();
+                const sortedVolcanoes = [...rawVolcanoData].sort((a, b) => b.name.length - a.name.length);
+
+                feedTexts.forEach(text => {
+                    if (!text) return;
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(text, "text/xml");
+                    const entries = Array.from(xmlDoc.getElementsByTagName('entry'));
+
+                    entries.forEach(entry => {
+                        const title = entry.querySelector('title')?.textContent || "";
+                        const content = entry.querySelector('content')?.textContent || "";
+                        const id = entry.querySelector('id')?.textContent;
+                        const updated = entry.querySelector('updated')?.textContent;
+
+                        if (!title.includes("火山") && !title.includes("噴火") && !title.includes("降灰") && !title.includes("火口")) {
+                            return;
+                        }
+
+                        if (id && !seenIds.has(id)) {
+                            seenIds.add(id);
+
+                            const normalizedTitle = title.replace(/（/g, '(').replace(/）/g, ')');
+                            const normalizedContent = content.replace(/（/g, '(').replace(/）/g, ')');
+
+                            let targetVolcano = null;
+
+                            if (normalizedTitle.includes("湯釜付近") || normalizedContent.includes("湯釜付近")) {
+                                targetVolcano = sortedVolcanoes.find(v => v.name === "草津白根山(湯釜)");
+                            }
+
+                            if (!targetVolcano) {
+                                for (let v of sortedVolcanoes) {
+                                    if (normalizedTitle.includes(v.name) || normalizedContent.includes(v.name)) {
+                                        targetVolcano = v;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (targetVolcano) {
+                                const link = entry.querySelector('link')?.getAttribute('href');
+                                
+                                let badgeClass = "text-slate-700 bg-slate-200";
+                                if (title.includes("速報")) badgeClass = "text-red-600 bg-red-100";
+                                else if (title.includes("警報")) badgeClass = "text-white bg-red-600 animate-pulse";
+                                else if (title.includes("予報")) badgeClass = "text-yellow-700 bg-yellow-100";
+                                else if (title.includes("詳細")) badgeClass = "text-orange-600 bg-orange-100";
+                                else if (title.includes("定時")) badgeClass = "text-blue-600 bg-blue-100";
+
+                                const d = new Date(updated);
+                                const timeStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} 発表`;
+
+                                let formattedHeadline = content.replace(/^【.*?】\s*/, '').trim();
+                                
+                                if (title.includes("火山観測報")) {
+                                    const timeMatch = content.match(/(\d+)日\s*(\d+)時(\d+)分頃/);
+                                    const volcanoMatch = content.match(/、([^（]+)（/);
+                                    const craterMatch = content.match(/（([^）]+)）/);
+                                    const phenomMatch = content.match(/で([^が]+)がありました/);
+                                    const heightMatch = content.match(/火口上(\d+m)/);
+                                    const dirMatch = content.match(/流向は([北南東西]+)/);
+
+                                    const dtStr = `${d.getFullYear()}年${String(d.getMonth()+1).padStart(2,'0')}月${timeMatch ? timeMatch[1].padStart(2,'0') : String(d.getDate()).padStart(2,'0')}日${timeMatch ? timeMatch[2].padStart(2,'0') : '  '}時${timeMatch ? timeMatch[3].padStart(2,'0') : '  '}分`;
+                                    const volStr = (volcanoMatch ? volcanoMatch[1] : targetVolcano.name) + (craterMatch ? `（${craterMatch[1]}）` : "");
+                                    const phenom = phenomMatch ? phenomMatch[1].trim() : "不明";
+                                    const h = heightMatch ? heightMatch[1] : "　";
+                                    const dir = dirMatch ? dirMatch[1] : "　";
+
+                                    formattedHeadline = `日時：${dtStr}(第 報)\n火山：${volStr}\n現象：${phenom}\n噴煙高度：火口上 ${h}\n噴煙の流向：${dir}`;
+                                }
+
+                                targetVolcano.reports.push({
+                                    title: title.replace(/【.+?】/, '').trim() || title,
+                                    time: timeStr,
+                                    badgeClass: badgeClass,
+                                    headline: formattedHeadline, 
+                                    link: link,
+                                    xmlLoaded: false,
+                                    timePeriods: [], 
+                                    updatedDate: d
+                                });
+                            }
+                        }
+                    });
+                });
+
+                rawVolcanoData.forEach(v => {
+                    if (v.reports.length > 0) {
+                        v.reports.sort((a, b) => b.updatedDate - a.updatedDate);
+                    }
+                });
+
+                renderTable(rawVolcanoData);
+                const now = new Date();
+                const updateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+                document.getElementById('header-update-time').innerText = `更新: ${updateStr}`;
+
+            } catch(e) {
+                console.error("Feed fetch error", e);
+                document.getElementById('header-update-time').innerText = `更新: 取得失敗`;
+            } finally {
+                document.getElementById('loading-indicator').classList.add('hidden');
+            }
+        }
+
+        // スプレッドシートに入っている 1〜7 の数字を自動的に無視してレベル判定を行う
+        function getLevelFromInfo(info) {
+            if (!info) return 0;
+            
+            // 状態テキストに含まれる 1〜7 などの全角・半角数字を正規表現ですべて除去してトリミング
+            const cleanInfo = info.replace(/[0-9０-９]/g, '').trim();
+
+            if (cleanInfo.includes('高齢者等避難')) return 4;
+            if (cleanInfo.includes('避難')) return 5;
+            if (cleanInfo.includes('入山規制') || cleanInfo.includes('入山危険') || cleanInfo.includes('周辺海域規制')) return 3;
+            if (cleanInfo.includes('火口周辺規制') || cleanInfo.includes('周辺海域警戒')) return 2;
+            if (cleanInfo.includes('活火山であることに留意')) return 1;
+            return 0;
+        }
+
+        function getLevelColor(level) {
+            switch(level) {
+                case 5: return "#9333ea"; 
+                case 4: return "#ec4899"; 
+                case 3: return "#dc2626"; 
+                case 2: return "#f97316"; 
+                case 1: return "#3b82f6"; 
+                default: return "#cbd5e1"; 
+            }
+        }
+
+        function getLevelBadgeClass(level) {
+            switch(level) {
+                case 5: return "bg-purple-600";
+                case 4: return "bg-pink-500";
+                case 3: return "bg-red-600";
+                case 2: return "bg-orange-500";
+                case 1: return "bg-blue-500";
+                default: return "bg-slate-300";
+            }
+        }
+
+        function parsePolygons(coordString) {
+            if (!coordString) return [];
+            const points = coordString.split('/').filter(p => p.trim() !== '');
+            const allPolygons = [];
+            let currentPolygon = [];
+            
+            points.forEach(point => {
+                const match = point.match(/([+-]\d+\.\d+)([+-]\d+\.\d+)/);
+                if (match) {
+                    const latlng = [parseFloat(match[1]), parseFloat(match[2])];
+                    currentPolygon.push(latlng);
+                    
+                    if (currentPolygon.length > 2 && 
+                        currentPolygon[0][0] === latlng[0] && 
+                        currentPolygon[0][1] === latlng[1]) {
+                        allPolygons.push(currentPolygon);
+                        currentPolygon = [];
+                    }
+                }
+            });
+            
+            if (currentPolygon.length > 0) {
+                allPolygons.push(currentPolygon);
+            }
+            
+            return allPolygons;
+        }
+
+        async function initMap() {
+            map = L.map('map', {
+                zoomSnap: 0.1,
+                attributionControl: false,
+                scrollWheelZoom: true,
+                doubleClickZoom: false
+            }).setView([37.5, 137.5], 5);
+
+            try {
+                const response = await fetchWithTimeout(PREF_GEOJSON_URL, {}, 3000);
+                const geoData = await response.json();
+                L.geoJson(geoData, {
+                    style: {
+                        fillColor: "#ffffff", 
+                        weight: 1,           
+                        opacity: 1,
+                        color: "#94a3b8",      
+                        fillOpacity: 1
+                    }
+                }).addTo(map);
+            } catch (e) { console.error("GeoJSON Error", e.message); }
+
+            currentPolygonsLayer = L.featureGroup().addTo(map);
+            renderMarkers(rawVolcanoData);
+        }
+
+        function renderMarkers(data) {
+            rawVolcanoData.forEach(v => {
+                if (v.marker) {
+                    map.removeLayer(v.marker);
+                    v.marker = null;
+                }
+            });
+
+            // 【改善点】警戒レベルが低い順に並べ替えてから描画します。
+            // これにより、警戒レベルが高い（=危険度が高い）火山マーカーが後から描画され、一番手前に重なります。
+            const sortedData = [...data].sort((a, b) => getLevelFromInfo(a.info) - getLevelFromInfo(b.info));
+
+            sortedData.forEach((v) => {
+                const lv = getLevelFromInfo(v.info);
+                const color = getLevelColor(lv);
+                
+                const marker = L.circleMarker([v.lat, v.lng], {
+                    radius: lv > 1 ? 6 : 4,
+                    fillColor: color,
+                    color: "#ffffff",
+                    weight: 1.5,
+                    opacity: 1,
+                    fillOpacity: 0.9
+                }).addTo(map);
+
+                marker.bindPopup(`
+                    <div class="text-slate-800">
+                        <div class="font-black text-xs border-b pb-1 mb-1">${v.name}</div>
+                        <div class="text-[10px]" style="color:${color}">Lv.${lv}: ${v.info}</div>
+                    </div>
+                `, { closeButton: false });
+
+                marker.on('click', () => selectVolcano(v.originalIndex));
+                v.marker = marker; 
+            });
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('volcano-tbody');
+            tbody.innerHTML = data.map((v) => {
+                const lv = getLevelFromInfo(v.info);
+                const colorClass = getLevelBadgeClass(lv);
+                const hasInfo = v.reports && v.reports.length > 0;
+                const infoIcon = hasInfo ? '<i class="fas fa-exclamation-triangle text-yellow-500 text-sm animate-pulse" title="関連情報あり"></i>' : '';
+
+                return `
+                    <tr id="row-${v.originalIndex}" class="hover:bg-slate-50 transition-colors cursor-pointer" onclick="selectVolcano(${v.originalIndex})">
+                        <td class="px-2 py-2 text-center">
+                            <span class="level-badge ${colorClass}">${lv}</span>
+                        </td>
+                        <td class="px-2 py-2 text-slate-400 font-bold text-[10px]">${v.reg}</td>
+                        <td class="px-2 py-2 font-black text-slate-800 text-xs">${v.name}</td>
+                        <td class="px-2 py-2 font-bold text-slate-600 text-[10px]">${v.info}</td>
+                        <td class="px-1 py-2 text-center">${infoIcon}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateTimeDisplay(volcanoIndex, reportIndex, value) {
+            const volcano = rawVolcanoData[volcanoIndex];
+            const report = volcano.reports[reportIndex];
+            const period = report.timePeriods[value];
+            if (period) {
+                const s = formatTimeOnly(period.startTime);
+                const e = formatTimeOnly(period.endTime);
+                const displayEl = document.getElementById(`time-display-${volcanoIndex}-${reportIndex}`);
+                if (displayEl) {
+                    displayEl.innerText = `${s} 〜 ${e}`;
+                }
+            }
+        }
+
+        function extractPolygonsFromItems(items) {
+            const polygons = [];
+            items.forEach(item => {
+                const kindName = item.querySelector('Kind > Name')?.textContent || "";
+                const polygonNodes = item.querySelectorAll('Property > Polygon');
+                
+                if (kindName && polygonNodes.length > 0) {
+                    let color, fillOpacity, isHatch = false;
+                    
+                    if (kindName.includes("やや多量")) { 
+                        color = "#eab308";
+                        fillOpacity = 0.6; 
+                    }
+                    else if (kindName.includes("少量")) { 
+                        color = "#94a3b8";
+                        fillOpacity = 0.5; 
+                    }
+                    else if (kindName.includes("多量")) { 
+                        color = "#ef4444";
+                        fillOpacity = 0.6; 
+                    }
+                    else if (kindName.includes("噴石")) { 
+                        color = "#dc2626";
+                        fillOpacity = 0.8; 
+                        isHatch = true;
+                    }
+                    else { 
+                        color = "#94a3b8"; fillOpacity = 0.5; 
+                    }
+                    
+                    const combinedRings = [];
+                    polygonNodes.forEach(polygonNode => {
+                        const rings = parsePolygons(polygonNode.textContent);
+                        combinedRings.push(...rings);
+                    });
+                    
+                    if (combinedRings.length > 0) {
+                        polygons.push({
+                            type: kindName,
+                            rings: combinedRings,
+                            color: color,
+                            fillOpacity: fillOpacity,
+                            isHatch: isHatch
+                        });
+                    }
+                }
+            });
+            return polygons;
+        }
+
+        async function selectVolcano(index) {
+            const volcano = rawVolcanoData[index];
+            
+            if (window.innerWidth < 768) {
+                document.getElementById('volcano-list-container').classList.add('hidden');
+                document.getElementById('volcano-list-container').classList.remove('flex');
+                document.getElementById('volcano-info-container').classList.remove('hidden');
+                document.getElementById('volcano-info-container').classList.add('flex');
+            }
+
+            setTimeout(() => { map.invalidateSize(); }, 10);
+
+            map.setView([volcano.lat, volcano.lng], 9, { animate: true });
+            if (volcano.marker) volcano.marker.openPopup();
+            
+            currentPolygonsLayer.clearLayers();
+            document.getElementById('legend-ash').classList.add('hidden');
+
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('active-row'));
+            const targetRow = document.getElementById(`row-${index}`);
+            if(targetRow) {
+                targetRow.classList.add('active-row');
+                const container = targetRow.closest('.overflow-y-auto');
+                if (container) {
+                    const top = targetRow.offsetTop - (container.offsetHeight / 2) + (targetRow.offsetHeight / 2);
+                    container.scrollTo({ top, behavior: 'smooth' });
+                }
+            }
+
+            document.getElementById('volcano-info-empty').classList.add('hidden');
+            const panel = document.getElementById('volcano-info-panel');
+            panel.classList.remove('hidden');
+
+            const lv = getLevelFromInfo(volcano.info);
+            const badge = document.getElementById('selected-volcano-badge');
+            badge.className = `level-badge ${getLevelBadgeClass(lv)} shadow-sm`;
+            badge.innerText = lv;
+            document.getElementById('selected-volcano-name').innerText = volcano.name;
+
+            const listContainer = document.getElementById('volcano-reports-list');
+
+            if (volcano.reports && volcano.reports.length > 0) {
+                renderReportsList(index);
+
+                let needReRender = false;
+                const fetchPromises = volcano.reports.map(async r => {
+                    if (!r.xmlLoaded && r.link) {
+                        try {
+                            const res = await fetchWithFastestProxy(r.link, 4500);
+                            const xmlText = await res.text();
+                            
+                            const cleanXml = xmlText.replace(/<([a-zA-Z0-9_-]+:)/g, '<').replace(/<\/([a-zA-Z0-9_-]+:)/g, '</');
+                            const doc = new DOMParser().parseFromString(cleanXml, "text/xml");
+                            
+                            if (r.title.includes("火山観測報")) {
+                                const eventTime = doc.querySelector('EventDateTime')?.textContent;
+                                const serial = doc.querySelector('Serial')?.textContent;
+                                const volcanoName = doc.querySelector('Body Area > Name')?.textContent || doc.querySelector('Head Headline Area > Name')?.textContent || "不明";
+                                const craterName = doc.querySelector('CraterName')?.textContent || "";
+                                const phenomenon = doc.querySelector('Body Kind > Name')?.textContent || "不明";
+                                
+                                const heightNode = doc.querySelector('PlumeHeightAboveCrater');
+                                const plumeHeight = heightNode && heightNode.textContent ? heightNode.textContent + 'm' : "　";
+                                
+                                const dirNode = doc.querySelector('PlumeDirection');
+                                const plumeDir = dirNode && dirNode.textContent ? dirNode.textContent : "　";
+
+                                let dtStr = "　年　月　日　時　分";
+                                if (eventTime) {
+                                    const d = new Date(eventTime);
+                                    if (!isNaN(d)) {
+                                        dtStr = `${d.getFullYear()}年${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日${String(d.getHours()).padStart(2,'0')}時${String(d.getMinutes()).padStart(2,'0')}分`;
+                                    }
+                                }
+                                const serialStr = serial ? `(第${serial}報)` : "(第 報)";
+                                const volStr = craterName ? `${volcanoName}（${craterName}）` : volcanoName;
+
+                                r.headline = `日時：${dtStr}${serialStr}\n火山：${volStr}\n現象：${phenomenon}\n噴煙高度：火口上 ${plumeHeight}\n噴煙の流向：${plumeDir}`;
+                            } else {
+                                const headlineText = doc.querySelector('Head > Headline > Text')?.textContent;
+                                if (headlineText) {
+                                    r.headline = headlineText.replace(/^【.*?】\s*/, '').trim();
+                                }
+                            }
+                            
+                            const timePeriods = [];
+                            const ashInfos = doc.querySelectorAll('AshInfo');
+                            
+                            if (ashInfos.length > 0) {
+                                ashInfos.forEach(ashInfo => {
+                                    const startTime = ashInfo.querySelector('StartTime')?.textContent;
+                                    const endTime = ashInfo.querySelector('EndTime')?.textContent;
+                                    const items = ashInfo.querySelectorAll('Item');
+                                    const polygons = extractPolygonsFromItems(items);
+                                    
+                                    if (polygons.length > 0) {
+                                        timePeriods.push({ startTime, endTime, polygons });
+                                    }
+                                });
+                            } else {
+                                const items = doc.querySelectorAll('Item');
+                                const polygons = extractPolygonsFromItems(items);
+                                if (polygons.length > 0) {
+                                    timePeriods.push({ startTime: null, endTime: null, polygons });
+                                }
+                            }
+                            
+                            r.timePeriods = timePeriods;
+                            r.xmlLoaded = true; 
+                            needReRender = true;
+                        } catch(e) {
+                            console.error("XML fetch error", e.message);
+                        }
+                    }
+                });
+
+                await Promise.all(fetchPromises);
+                if (needReRender) {
+                    renderReportsList(index);
+                }
+
+            } else {
+                listContainer.innerHTML = `
+                    <div class="text-center py-10 text-slate-400 text-xs font-bold bg-white rounded-xl border border-slate-100 shadow-sm">
+                        現在発表されている関連情報はありません
+                    </div>
+                `;
+            }
+        }
+
+        function renderReportsList(volcanoIndex) {
+            const volcano = rawVolcanoData[volcanoIndex];
+            const listContainer = document.getElementById('volcano-reports-list');
+
+            listContainer.innerHTML = volcano.reports.map((r, rIdx) => {
+                const hasPolygon = r.timePeriods && r.timePeriods.length > 0;
+                const isLoading = !r.xmlLoaded;
+
+                let timeSliderHtml = '';
+                if (hasPolygon && r.timePeriods.length > 1) {
+                    const maxIdx = r.timePeriods.length - 1;
+                    const initStart = formatTimeOnly(r.timePeriods[0].startTime);
+                    const initEnd = formatTimeOnly(r.timePeriods[0].endTime);
+                    
+                    timeSliderHtml = `
+                        <div class="mt-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200" onclick="event.stopPropagation()">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-[10px] font-bold text-slate-500">対象時間:</span>
+                                <span id="time-display-${volcanoIndex}-${rIdx}" class="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                    ${initStart} 〜 ${initEnd}
+                                </span>
+                            </div>
+                            <input type="range" id="time-slider-${volcanoIndex}-${rIdx}" min="0" max="${maxIdx}" value="0" class="w-full h-1.5 rounded-lg appearance-none cursor-pointer" oninput="updateTimeDisplay(${volcanoIndex}, ${rIdx}, this.value)" onchange="showReportOnMap(${volcanoIndex}, ${rIdx})">
+                            <div class="flex justify-between mt-1 px-1">
+                                <span class="text-[8px] font-bold text-slate-400">現在</span>
+                                <span class="text-[8px] font-bold text-slate-400">後</span>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div id="report-${volcanoIndex}-${rIdx}" class="bg-white border-2 border-slate-100 p-4 rounded-xl shadow-sm hover:border-blue-300 transition-colors cursor-pointer" onclick="showReportOnMap(${volcanoIndex}, ${rIdx})">
+                        <div class="flex justify-between items-center mb-3">
+                            <span class="text-xs font-black ${r.badgeClass} px-2 py-1 rounded">${r.title}</span>
+                            <span class="text-[10px] text-slate-400 font-bold"><i class="far fa-clock mr-1"></i>${r.time}</span>
+                        </div>
+                        <p class="text-xs text-slate-700 font-bold whitespace-pre-wrap leading-relaxed">${r.headline}</p>
+                        
+                        ${isLoading ? `
+                            <div class="mt-3 text-slate-400 text-[10px] font-bold">
+                                <i class="fas fa-spinner fa-spin mr-1"></i> 詳細情報と降灰範囲をロード中...
+                            </div>
+                        ` : ''}
+
+                        ${hasPolygon ? `
+                            <div class="mt-3 flex flex-col gap-2">
+                                ${timeSliderHtml}
+                                <div class="text-right">
+                                    <span class="inline-flex items-center text-[10px] font-black text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-100">
+                                        <i class="fas fa-map-marked-alt mr-1.5"></i>降灰範囲を地図に表示
+                                    </span>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function showReportOnMap(volcanoIndex, reportIndex) {
+            const volcano = rawVolcanoData[volcanoIndex];
+            const report = volcano.reports[reportIndex];
+            const legendAsh = document.getElementById('legend-ash');
+            
+            if (!report.xmlLoaded) return;
+            
+            currentPolygonsLayer.clearLayers();
+            
+            document.querySelectorAll('[id^="report-"]').forEach(el => el.classList.remove('active-report'));
+            document.getElementById(`report-${volcanoIndex}-${reportIndex}`).classList.add('active-report');
+            
+            if (report.timePeriods && report.timePeriods.length > 0) {
+                let periodIndex = 0;
+                const sliderEl = document.getElementById(`time-slider-${volcanoIndex}-${reportIndex}`);
+                if (sliderEl) {
+                    periodIndex = parseInt(sliderEl.value, 10);
+                }
+                
+                const currentPeriod = report.timePeriods[periodIndex];
+
+                if (currentPeriod && currentPeriod.polygons && currentPeriod.polygons.length > 0) {
+                    legendAsh.classList.remove('hidden');
+
+                    currentPeriod.polygons.forEach(p => {
+                        if (p.rings && p.rings.length > 0) {
+                            const polygon = L.polygon(p.rings, {
+                                color: p.color,
+                                fillColor: p.isHatch ? 'url(#diagonal-hatch)' : p.color, 
+                                fillOpacity: p.fillOpacity,
+                                weight: 2,
+                                dashArray: p.isHatch ? '5, 5' : null 
+                            }).addTo(currentPolygonsLayer);
+                            
+                            polygon.bindPopup(`<div class="font-black text-xs text-slate-800">${p.type}</div>`);
+                        }
+                    });
+                    
+                    const bounds = currentPolygonsLayer.getBounds();
+                    bounds.extend([volcano.lat, volcano.lng]); 
+
+                    const padding = window.innerWidth < 768 ? [20, 20] : [50, 50];
+                    map.fitBounds(bounds, { padding: padding });
+
+                } else {
+                    legendAsh.classList.add('hidden');
+                    map.setView([volcano.lat, volcano.lng], 10, { animate: true });
+                }
+            } else {
+                legendAsh.classList.add('hidden');
+                map.setView([volcano.lat, volcano.lng], 10, { animate: true });
+            }
+        }
+
+        function filterVolcanoes() {
+            showListMobile();
+            currentPolygonsLayer.clearLayers();
+            document.getElementById('legend-ash').classList.add('hidden');
+
+            const term = document.getElementById('search-input').value.toLowerCase();
+            const filtered = rawVolcanoData.filter(v => 
+                v.name.toLowerCase().includes(term) || 
+                v.reg.toLowerCase().includes(term) || 
+                v.info.toLowerCase().includes(term)
+            );
+            renderTable(filtered);
+            renderMarkers(filtered);
+        }
+
+        // 全国表示リセット
+        function resetMapView() {
+            showListMobile();
+            map.setView([37.5, 137.5], 5, { animate: true });
+            map.closePopup();
+            currentPolygonsLayer.clearLayers();
+            document.getElementById('legend-ash').classList.add('hidden');
+            
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('active-row'));
+            document.getElementById('volcano-info-panel').classList.add('hidden');
+            document.getElementById('volcano-info-empty').classList.remove('hidden');
+        }
+
+        window.onload = async () => {
+            rawVolcanoData.forEach((v, i) => v.originalIndex = i);
+            
+            // スプレッドシートから警戒事項データを取得して上書き
+            await fetchSpreadsheetData();
+
+            await initMap();
+            renderTable(rawVolcanoData);
+            
+            // 初回ロード時に気象庁XMLフィードを取得開始
+            fetchAllVolcanoFeeds();
+        };
+    </script>
+</body>
+</html>

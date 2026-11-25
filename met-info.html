@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EWC気象情報</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #ffffff;
+            color: #1e293b;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .category-header {
+            position: sticky;
+            top: 104px;
+            z-index: 10;
+            background-color: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(4px);
+        }
+
+        .entry-card {
+            transition: all 0.1s ease;
+        }
+        
+        .entry-card:hover {
+            background-color: #f8fafc;
+        }
+
+        .weather-text {
+            line-height: 2.1;
+            letter-spacing: 0.01em;
+        }
+
+        #contentArea {
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+        
+        .tab-container {
+            padding-bottom: 2px;
+        }
+
+        /* 確率表示用バー */
+        .prob-bar {
+            height: 14px;
+            border-radius: 7px;
+            overflow: hidden;
+            display: flex;
+            background-color: #f1f5f9;
+        }
+
+        /* 横幅いっぱいに広げるための調整 */
+        .full-width-container {
+            width: 100%;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        @media (min-width: 768px) {
+            .full-width-container {
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+        }
+        @media (min-width: 1024px) {
+            .full-width-container {
+                padding-left: 4rem;
+                padding-right: 4rem;
+            }
+        }
+
+        /* detailsアコーディオンの標準矢印を非表示に */
+        details > summary { list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+
+        /* 生データコンテナ用の追加デザイン */
+        .raw-data-box {
+            font-family: monospace;
+            font-size: 11px;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: 1rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 500px;
+        }
+    </style>
+</head>
+<body class="overflow-y-auto w-full">
+
+    <div class="min-h-screen flex flex-col w-full">
+        <!-- ヘッダー -->
+        <header class="sticky top-0 bg-white z-20 flex flex-col shadow-sm w-full">
+            <div class="border-b border-slate-50 py-4 full-width-container">
+                <div class="w-full flex items-center justify-between">
+                    <div class="flex flex-col">
+                        <h1 class="text-sm font-black tracking-widest text-slate-800 uppercase">EWC気象情報</h1>
+                        <p class="text-[9px] text-slate-400 mt-0.5 font-medium"></p>
+                    </div>
+
+                    <div class="flex items-center gap-4">
+                        <div id="lastUpdate" class="text-[9px] font-bold text-slate-300"></div>
+                        
+                        <button onclick="fetchFeeds()" class="p-1 hover:bg-slate-50 rounded transition-colors text-slate-300 hover:text-slate-600" title="更新">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="border-b border-slate-100 overflow-x-auto custom-scrollbar tab-container">
+                <div class="full-width-container flex gap-6 pt-3 min-w-max">
+                    <button id="tab-weather" class="pb-2 border-b-2 border-blue-600 text-blue-600 font-bold text-xs whitespace-nowrap transition-colors" onclick="switchTab('weather')">気象情報</button>
+                    <button id="tab-longrange" class="pb-2 border-b-2 border-transparent text-slate-400 hover:text-slate-600 font-bold text-xs whitespace-nowrap transition-colors" onclick="switchTab('longrange')">長期予報</button>
+                    <button id="tab-tide" class="pb-2 border-b-2 border-transparent text-slate-400 hover:text-slate-600 font-bold text-xs whitespace-nowrap transition-colors" onclick="switchTab('tide')">潮位情報</button>
+                    <button id="tab-early" class="pb-2 border-b-2 border-transparent text-slate-400 hover:text-slate-600 font-bold text-xs whitespace-nowrap transition-colors" onclick="switchTab('early')">早期天候情報</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="flex-1 w-full full-width-container pb-20">
+            <div id="entryList" class="divide-y divide-slate-50 mt-4">
+                <div class="py-20 text-center text-slate-200">
+                    <div class="inline-block h-5 w-5 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 個別詳細表示ビュー -->
+        <section id="contentArea" class="fixed inset-0 z-50 bg-white overflow-y-auto hidden opacity-0 translate-y-4">
+            <div class="sticky top-0 bg-white/90 backdrop-blur-md full-width-container py-4 border-b border-slate-50 flex items-center justify-between z-30">
+                <button onclick="closeDetail()" class="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                    <span class="text-[10px] font-bold tracking-widest uppercase">閉じる</span>
+                </button>
+                <span class="text-[10px] text-slate-400 font-medium"></span>
+            </div>
+            
+            <div id="detailView" class="w-full full-width-container py-8 md:py-14 pb-32">
+                <div id="detailContainer" class="w-full"></div>
+            </div>
+        </section>
+
+        <!-- 全取得電文一覧（デバッグ用）モーダル -->
+        <section id="telegramsModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden fade-in">
+                <!-- モーダルヘッダー -->
+                <div class="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                    <div>
+                        <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                            <i data-lucide="terminal" class="w-5 h-5 text-blue-600"></i>
+                            <span>取得生電文一覧（デバッグ・解析）</span>
+                        </h3>
+                        <p class="text-[11px] text-slate-400 mt-1"></p>
+                    </div>
+                    <button onclick="toggleTelegramsModal()" class="p-2 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <!-- 検索バー・カウンター -->
+                <div class="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap gap-4 items-center justify-between">
+                    <div class="flex items-center gap-2 text-xs text-slate-500">
+                        <span class="font-bold">取得総数:</span> 
+                        <span id="telegramsCount" class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-mono font-bold">0</span> 件
+                    </div>
+                    <div class="flex items-center gap-2 w-full sm:w-auto">
+                        <div class="relative w-full sm:w-72">
+                            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                            <input type="text" id="telegramsSearch" placeholder="電文タイトルやコードで検索..." class="w-full pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500" oninput="filterTelegrams()">
+                        </div>
+                    </div>
+                </div>
+                <!-- 電文テーブルリスト -->
+                <div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="border-b border-slate-200 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                    <th class="pb-3 pl-2 w-24">電文コード</th>
+                                    <th class="pb-3 w-20">系統</th>
+                                    <th class="pb-3">電文タイトル (displayTitle)</th>
+                                    <th class="pb-3 w-36">発表日時</th>
+                                    <th class="pb-3 w-32">気象台名</th>
+                                    <th class="pb-3 pr-2 text-right w-24">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="telegramsTableBody" class="divide-y divide-slate-100 text-slate-600">
+                                <!-- JSで動的に構築 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const FEEDS = [
+            "https://www.data.jma.go.jp/developer/xml/feed/regular.xml",
+            "https://www.data.jma.go.jp/developer/xml/feed/extra.xml",
+            "https://www.data.jma.go.jp/developer/xml/feed/other.xml"
+        ];
+
+        const REGIONAL_ORDER = ["北海道地方", "東北地方", "関東甲信地方", "東海地方", "北陸地方", "近畿地方", "中国地方", "四国地方", "九州北部地方", "九州南部・奄美地方", "沖縄地方"];
+        const PREFECTURAL_ORDER = ["宗谷地方", "上川・留萌地方", "網走・北見・紋別地方", "釧路・根室地方", "十勝地方", "胆振・日高地方", "石狩・空知・後志地方", "渡島・檜山地方", "青森県", "秋田県", "岩手県", "山形県", "宮城県", "福島県", "茨城県", "群馬県", "栃木県", "埼玉県", "千葉県", "東京都", "神奈川県", "山梨県", "長野県", "新潟県", "富山県", "石川県", "福井県", "静岡県", "岐阜県", "愛知県", "三重県", "大阪府", "兵庫県", "京都府", "滋賀県", "奈良県", "和歌山県", "島根県", "広島県", "鳥取県", "岡山県", "山口県", "香川県", "愛媛県", "徳島県", "高知県", "福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県(奄美地方を除く)", "鹿児島県", "奄美地方", "沖縄本島地方", "大東島地方", "宮古島地方", "八重山地方"];
+
+        // 地方別アコーディオン用ソート順序
+        const COMMON_REGION_ORDER = ["北海道地方", "東北地方", "関東甲信地方", "東海地方", "北陸地方", "近畿地方", "中国地方", "四国地方", "九州北部地方（山口県を含む）", "九州南部・奄美地方", "沖縄地方", "その他"];
+
+        // 区域名から地方名を判定するためのマッピング
+        const AREA_TO_REGION = {
+            "北海道日本海側": "北海道地方", "北海道オホーツク海側": "北海道地方", "北海道太平洋側": "北海道地方", "北海道地方": "北海道地方",
+            "東北日本海側": "東北地方", "東北太平洋側": "東北地方", "東北地方": "東北地方",
+            "関東甲信地方": "関東甲信地方",
+            "北陸地方": "北陸地方",
+            "東海地方": "東海地方",
+            "近畿日本海側": "近畿地方", "近畿太平洋側": "近畿地方", "近畿地方": "近畿地方",
+            "中国地方": "中国地方",
+            "四国地方": "四国地方",
+            "九州北部地方（山口県を含む）": "九州北部地方（山口県を含む）", "九州北部地方": "九州北部地方（山口県を含む）",
+            "九州南部": "九州南部・奄美地方", "奄美地方": "九州南部・奄美地方", "九州南部・奄美地方": "九州南部・奄美地方",
+            "沖縄地方": "沖縄地方"
+        };
+
+        // 地点名から地方名を判定するためのマッピング
+        const STATION_TO_REGION = {
+            "稚内": "北海道地方", "旭川": "北海道地方", "留萌": "北海道地方", "札幌": "北海道地方", "岩見沢": "北海道地方", "倶知安": "北海道地方", "網走": "北海道地方", "北見": "北海道地方", "紋別": "北海道地方", "根室": "北海道地方", "釧路": "北海道地方", "帯広": "北海道地方", "室蘭": "北海道地方", "苫小牧": "北海道地方", "浦河": "北海道地方", "函館": "北海道地方", "江差": "北海道地方", "広尾": "北海道地方", "寿都": "北海道地方", "雄武": "北海道地方", "羽幌": "北海道地方", "枝幸": "北海道地方",
+            "青森": "東北地方", "むつ": "東北地方", "八戸": "東北地方", "深浦": "東北地方", "秋田": "東北地方", "盛岡": "東北地方", "宮古": "東北地方", "大船渡": "東北地方", "山形": "東北地方", "酒田": "東北地方", "新庄": "東北地方", "仙台": "東北地方", "白石": "東北地方", "福島": "東北地方", "若松": "東北地方", "小名浜": "東北地方", "石巻": "東北地方",
+            "水戸": "関東甲信地方", "宇都宮": "関東甲信地方", "前橋": "関東甲信地方", "熊谷": "関東甲信地方", "長野": "関東甲信地方", "松本": "関東甲信地方", "諏訪": "関東甲信地方", "軽井沢": "関東甲信地方", "飯田": "関東甲信地方", "甲府": "関東甲信地方", "河口湖": "関東甲信地方", "銚子": "関東甲信地方", "千葉": "関東甲信地方", "勝浦": "関東甲信地方", "館山": "関東甲信地方", "東京": "関東甲信地方", "大島": "関東甲信地方", "八丈島": "関東甲信地方", "父島": "関東甲信地方", "三宅島": "関東甲信地方", "横浜": "関東甲信地方", "小田原": "関東甲信地方", "秩父": "関東甲信地方", "日光": "関東甲信地方",
+            "新潟": "北陸地方", "相川": "北陸地方", "高田": "北陸地方", "富山": "北陸地方", "伏木": "北陸地方", "金沢": "北陸地方", "輪島": "北陸地方", "福井": "北陸地方", "敦賀": "北陸地方",
+            "静岡": "東海地方", "網代": "東海地方", "三島": "東海地方", "浜松": "東海地方", "御前崎": "東海地方", "石廊崎": "東海地方", "岐阜": "東海地方", "高山": "東海地方", "名古屋": "東海地方", "豊橋": "東海地方", "伊良湖": "東海地方", "津": "東海地方", "尾鷲": "東海地方", "四日市": "東海地方", "上野": "東海地方",
+            "彦根": "近畿地方", "京都": "近畿地方", "舞鶴": "近畿地方", "大阪": "近畿地方", "神戸": "近畿地方", "豊岡": "近畿地方", "洲本": "近畿地方", "奈良": "近畿地方", "和歌山": "近畿地方", "潮岬": "近畿地方", "姫路": "近畿地方",
+            "鳥取": "中国地方", "米子": "中国地方", "境": "中国地方", "松江": "中国地方", "浜田": "中国地方", "西郷": "中国地方", "岡山": "中国地方", "津山": "中国地方", "広島": "中国地方", "呉": "中国地方", "福山": "中国地方",
+            "徳島": "四国地方", "高松": "四国地方", "松山": "四国地方", "宇和島": "四国地方", "高知": "四国地方", "室戸岬": "四国地方", "清水": "四国地方", "宿毛": "四国地方", "多度津": "四国地方",
+            "山口": "九州北部地方（山口県を含む）", "下関": "九州北部地方（山口県を含む）", "萩": "九州北部地方（山口県を含む）", "福岡": "九州北部地方（山口県を含む）", "飯塚": "九州北部地方（山口県を含む）", "厳原": "九州北部地方（山口県を含む）", "福江": "九州北部地方（山口県を含む）", "大分": "九州北部地方（山口県を含む）", "日田": "九州北部地方（山口県を含む）", "佐賀": "九州北部地方（山口県を含む）", "長崎": "九州北部地方（山口県を含む）", "佐世保": "九州北部地方（山口県を含む）", "平戸": "九州北部地方（山口県を含む）", "雲仙岳": "九州北部地方（山口県を含む）", "熊本": "九州北部地方（山口県を含む）", "牛深": "九州北部地方（山口県を含む）", "阿蘇山": "九州北部地方（山口県を含む）", "人吉": "九州北部地方（山口県を含む）",
+            "宮崎": "九州南部・奄美地方", "延岡": "九州南部・奄美地方", "都城": "九州南部・奄美地方", "油津": "九州南部・奄美地方", "鹿児島": "九州南部・奄美地方", "阿久根": "九州南部・奄美地方", "枕崎": "九州南部・奄美地方", "屋久島": "九州南部・奄美地方", "種子島": "九州南部・奄美地方", "名瀬": "九州南部・奄美地方", "沖永良部": "九州南部・奄美地方",
+            "那覇": "沖縄地方", "名護": "沖縄地方", "久米島": "沖縄地方", "南大東": "沖縄地方", "南大東島": "沖縄地方", "宮古島": "沖縄地方", "石垣島": "沖縄地方", "西表島": "沖縄地方", "与那国島": "沖縄地方"
+        };
+
+        // アプリ全体のステート
+        let categorizedData = { 
+            weather: { general: [], regional: [], prefectural: [] },
+            longrange: { forecast: [], temp_prob: [], early_warning: [] },
+            tide: { general: [], regional: [], prefectural: [] },
+            early: { general: [], regional: [], prefectural: [] },
+            marine: { general: [], regional: [] }
+        };
+        let allFetchedEntries = []; // デバッグモーダル用の重複なしの単体生電文を全て格納
+        let currentTab = 'weather';
+
+        lucide.createIcons();
+
+        function switchTab(tabId) {
+            currentTab = tabId;
+            const activeClass = "pb-2 border-b-2 border-blue-600 text-blue-600 font-bold text-xs whitespace-nowrap transition-colors";
+            const inactiveClass = "pb-2 border-b-2 border-transparent text-slate-400 hover:text-slate-600 font-bold text-xs whitespace-nowrap transition-colors";
+            
+            const tabs = ['weather', 'longrange', 'tide', 'early', 'marine'];
+            tabs.forEach(id => {
+                const el = document.getElementById(`tab-${id}`);
+                if (el) {
+                    el.className = tabId === id ? activeClass : inactiveClass;
+                }
+            });
+            
+            renderCategorizedList();
+        }
+
+        function formatToReiwa(date) {
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1;
+            const day = date.getDate();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const reiwaYear = year - 2018;
+            const eraName = year >= 2019 ? `令和${reiwaYear}年` : `${year}年`;
+            return `${eraName}${month}月${day}日 ${hours}:${minutes}`;
+        }
+
+        function extractFullTitle(entryXml) {
+            const content = entryXml.getElementsByTagName('content')[0]?.textContent || "";
+            const bracketMatch = content.match(/【([^】]+)】/);
+            if (bracketMatch && bracketMatch[1]) return bracketMatch[1].trim();
+            return entryXml.getElementsByTagName('title')[0]?.textContent || "";
+        }
+
+        function identifyAreaKey(displayTitle) {
+            if (displayTitle.includes("鹿児島県(奄美地方を除く)")) return "鹿児島県(奄美地方を除く)";
+            for (const area of PREFECTURAL_ORDER) if (displayTitle.startsWith(area)) return area;
+            for (const area of REGIONAL_ORDER) if (displayTitle.startsWith(area)) return area;
+            const match = displayTitle.match(/(.+?地方|.+?県|東京都|.+?府|北海道)/);
+            return match ? match[1] : displayTitle;
+        }
+
+        // タイトル表記の揺れを統一して比較しやすくする関数
+        function getNormalizedTitle(title) {
+            return title
+                .replace("解説", "")
+                .replace("（台風第", "(台風第")
+                .replace("）", ")");
+        }
+
+        // 電文同士を論理的にグルーピングするための正規化キーを作成 (同一発表日時・発表局用)
+        function getGroupKey(item) {
+            const normalizedTitle = getNormalizedTitle(item.displayTitle);
+            // 発表日時（分単位）、発表局、正規化タイトルを結合してキーとする
+            const minutes = Math.floor(item.updated.getTime() / (1000 * 60));
+            return `${item.author}_${minutes}_${normalizedTitle}`;
+        }
+
+        async function fetchFeeds() {
+            try {
+                document.getElementById('entryList').innerHTML = `
+                    <div class="py-20 text-center text-slate-200">
+                        <div class="inline-block h-5 w-5 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+                    </div>`;
+
+                categorizedData = { 
+                    weather: { general: [], regional: [], prefectural: [] },
+                    longrange: { forecast: [], temp_prob: [], early_warning: [] },
+                    tide: { general: [], regional: [], prefectural: [] },
+                    early: { general: [], regional: [], prefectural: [] },
+                    marine: { general: [], regional: [] }
+                };
+                const allItems = [];
+
+                for (const url of FEEDS) {
+                    const response = await fetch(url);
+                    const text = await response.text();
+                    const xmlDoc = new DOMParser().parseFromString(text, "text/xml");
+                    const entries = Array.from(xmlDoc.getElementsByTagName('entry'));
+
+                    for (let entry of entries) {
+                        const link = entry.querySelector('link[type="application/xml"]')?.getAttribute('href') || entry.getElementsByTagName('link')[0]?.getAttribute('href');
+                        if (!link) continue;
+                        const code = (link.match(/_(V[A-Z0-9]+)_/) || [])[1] || "";
+                        
+                        // 警報・注意報系電文コードをスキップ（海上系は除く）
+                        if ((code.startsWith('VPWW') && code !== 'VPWW53') || code.startsWith('VPHW')) continue;
+                        if (code.startsWith('VPFG')) continue;
+                        if (code.startsWith('VPAW') && code !== 'VPAW51') continue;
+
+                        let displayTitle = extractFullTitle(entry);
+                        if ((displayTitle.includes("気象警報") || displayTitle.includes("注意報")) && !displayTitle.includes("地震") && !displayTitle.includes("海上")) continue;
+
+                        const author = entry.getElementsByTagName('author')[0]?.getElementsByTagName('name')[0]?.textContent;
+                        const updated = new Date(entry.getElementsByTagName('updated')[0]?.textContent);
+                        const content = entry.getElementsByTagName('content')[0]?.textContent || "";
+
+                        allItems.push({
+                            updated, author, link, code, displayTitle, content
+                        });
+                    }
+                }
+
+                // 重複リンク排除後の「生」エントリー配列を保持
+                const uniqueItems = Array.from(new Map(allItems.map(item => [item.link, item])).values());
+                allFetchedEntries = uniqueItems; 
+
+                // 1. 同一発表時刻におけるマージ（平文情報と気象情報をグループ化する）
+                const tempGroups = {};
+                uniqueItems.forEach(item => {
+                    const key = getGroupKey(item);
+                    if (!tempGroups[key]) {
+                        tempGroups[key] = {
+                            key: key,
+                            displayTitle: item.displayTitle, 
+                            updated: item.updated,
+                            author: item.author,
+                            links: [] 
+                        };
+                    }
+                    tempGroups[key].links.push({
+                        url: item.link,
+                        code: item.code
+                    });
+
+                    // 平文情報(J50等)を優先して代表タイトルにする
+                    if (item.code.endsWith('J50') || item.code.endsWith('J51') || item.code.endsWith('J52')) {
+                        tempGroups[key].displayTitle = item.displayTitle;
+                        tempGroups[key].code = item.code;
+                        tempGroups[key].link = item.link;
+                    }
+                });
+
+                // 2. [NEW] 最新発表優先フィルター（発表が更新された同じ現象の古い情報を非表示にする）
+                const latestGroups = {};
+                Object.values(tempGroups).forEach(groupItem => {
+                    // 代表リンクが未設定の場合は、配列の最初の要素を代表として設定
+                    if (!groupItem.link) {
+                        groupItem.link = groupItem.links[0].url;
+                        groupItem.code = groupItem.links[0].code;
+                    }
+
+                    // 気象台名 ＋ 正規化タイトルをキーにする
+                    const normTitle = getNormalizedTitle(groupItem.displayTitle);
+                    const dedupKey = `${groupItem.author}_${normTitle}`;
+
+                    if (!latestGroups[dedupKey]) {
+                        latestGroups[dedupKey] = groupItem;
+                    } else {
+                        // 既に存在する場合は発表時間が新しいものを優先して残す（古いのは捨てる）
+                        if (groupItem.updated > latestGroups[dedupKey].updated) {
+                            latestGroups[dedupKey] = groupItem;
+                        }
+                    }
+                });
+
+                // 最終的に絞り込まれたグループのみをカテゴリへ振り分ける
+                Object.values(latestGroups).forEach(groupItem => {
+                    const title = groupItem.displayTitle;
+                    const code = groupItem.code;
+
+                    // 海上警報の判定
+                    if (code.startsWith('VMCG') || title.includes('全般海上警報')) {
+                        categorizedData.marine.general.push(groupItem);
+                    } else if (code.startsWith('VMCF') || title.includes('地方海上警報') || title.includes('海上予報') || title.includes('海上気象')) {
+                        categorizedData.marine.regional.push(groupItem);
+                    }
+                    // 長期予報・早期警戒
+                    else if (title.includes('異常天候早期警戒情報') || code === 'VPWW53') {
+                        categorizedData.longrange.early_warning.push(groupItem);
+                    } else if (title.includes('２週間気温予報')) {
+                        categorizedData.longrange.temp_prob.push(groupItem);
+                    } else if (title.includes('1か月予報') || title.includes('１か月予報') || title.includes('3か月予報') || title.includes('３か月予報') || title.includes('暖候期予報') || title.includes('寒候期予報')) {
+                        categorizedData.longrange.forecast.push(groupItem);
+                    } else if (code === 'VPZK50' || code === 'VPCK50') {
+                        categorizedData.longrange.forecast.push(groupItem);
+                    }
+                    // 潮位情報
+                    else if (code.startsWith('VMCJ')) {
+                        if (code === 'VMCJ50') categorizedData.tide.general.push(groupItem);
+                        else if (code === 'VMCJ51') categorizedData.tide.regional.push(groupItem);
+                        else if (code === 'VMCJ52') categorizedData.tide.prefectural.push(groupItem);
+                    } 
+                    // 早期天候情報
+                    else if (code === 'VPAW51') {
+                        if (title.includes('全般')) categorizedData.early.general.push(groupItem);
+                        else if (title.includes('地方')) categorizedData.early.regional.push(groupItem);
+                        else categorizedData.early.prefectural.push(groupItem);
+                    }
+                    // 気象情報 (その他)
+                    else {
+                        if (code.startsWith('VPZJ')) categorizedData.weather.general.push(groupItem);
+                        else if (code.startsWith('VPCJ')) categorizedData.weather.regional.push(groupItem);
+                        else if (code.startsWith('VPFJ') || code.startsWith('VPBS') || code.startsWith('VPOA')) categorizedData.weather.prefectural.push(groupItem);
+                    }
+                });
+
+                sortData();
+                renderCategorizedList();
+                document.getElementById('lastUpdate').innerText = `UPDATED: ${new Date().toLocaleTimeString('ja-JP')}`;
+            } catch (error) {
+                console.error(error);
+                document.getElementById('entryList').innerHTML = `<p class="py-20 text-center text-slate-400 text-xs">データの取得に失敗しました</p>`;
+            }
+        }
+
+        function sortData() {
+            const sortFn = (list, order) => list.sort((a, b) => {
+                const idxA = order.indexOf(identifyAreaKey(a.displayTitle));
+                const idxB = order.indexOf(identifyAreaKey(b.displayTitle));
+                if (idxA === idxB) return b.updated - a.updated;
+                return (idxA === -1 ? 9999 : idxA) - (idxB === -1 ? 9999 : idxB);
+            });
+
+            const sortLongrangeFn = (list) => list.sort((a, b) => {
+                const isGenA = a.displayTitle.includes('全般') ? 0 : 1;
+                const isGenB = b.displayTitle.includes('全般') ? 0 : 1;
+                if (isGenA !== isGenB) return isGenA - isGenB;
+
+                const idxA = REGIONAL_ORDER.indexOf(identifyAreaKey(a.displayTitle));
+                const idxB = REGIONAL_ORDER.indexOf(identifyAreaKey(b.displayTitle));
+                if (idxA !== -1 && idxB !== -1 && idxA !== idxB) return idxA - idxB;
+                
+                return b.updated - a.updated;
+            });
+
+            ['weather', 'tide', 'early'].forEach(tab => {
+                categorizedData[tab].general.sort((a, b) => b.updated - a.updated);
+                sortFn(categorizedData[tab].regional, REGIONAL_ORDER);
+                sortFn(categorizedData[tab].prefectural, PREFECTURAL_ORDER);
+            });
+
+            categorizedData.marine.general.sort((a, b) => b.updated - a.updated);
+            categorizedData.marine.regional.sort((a, b) => b.updated - a.updated);
+
+            sortLongrangeFn(categorizedData.longrange.forecast);
+            sortLongrangeFn(categorizedData.longrange.temp_prob);
+            sortLongrangeFn(categorizedData.longrange.early_warning);
+        }
+
+        function renderCategorizedList() {
+            const container = document.getElementById('entryList');
+            container.innerHTML = "";
+            const data = categorizedData[currentTab];
+            let cats = [];
+
+            if (currentTab === 'weather') {
+                cats = [
+                    { n: `全般気象情報`, d: data.general },
+                    { n: `地方気象情報`, d: data.regional },
+                    { n: `府県気象情報`, d: data.prefectural }
+                ];
+            } else if (currentTab === 'tide') {
+                cats = [
+                    { n: `全般潮位情報`, d: data.general },
+                    { n: `地方潮位情報`, d: data.regional },
+                    { n: `府県潮位情報`, d: data.prefectural }
+                ];
+            } else if (currentTab === 'early') {
+                cats = [
+                    { n: `全国早期天候情報`, d: data.general },
+                    { n: `地方早期天候情報`, d: data.regional }
+                ];
+            } else if (currentTab === 'longrange') {
+                cats = [
+                    { n: `長期予報 (1か月・3か月・暖候期・寒候期)`, d: data.forecast },
+                    { n: `異常天候早期警戒情報`, d: data.early_warning },
+                    { n: `2週間気温予報`, d: data.temp_prob }
+                ];
+            } else if (currentTab === 'marine') {
+                cats = [
+                    { n: `全般海上警報 (日本近海・台風・熱帯低気圧)`, d: data.general },
+                    { n: `地方海上警報 (各海域の強風・濃霧警告)`, d: data.regional }
+                ];
+            }
+
+            cats.forEach(cat => {
+                const header = document.createElement('div');
+                header.className = "category-header px-4 py-2 border-b border-slate-50";
+                header.innerHTML = `<span class="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em]">${cat.n}</span>`;
+                container.appendChild(header);
+
+                if (cat.d.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = "px-4 py-8 text-center";
+                    empty.innerHTML = `<p class="text-[10px] font-bold text-slate-200 uppercase tracking-widest italic">現在、発表されている情報はありません</p>`;
+                    container.appendChild(empty);
+                } else {
+                    cat.d.forEach(item => {
+                        const btn = document.createElement('button');
+                        btn.className = "entry-card w-full text-left px-4 py-4 outline-none border-b border-slate-50 hover:bg-slate-50 transition-colors";
+                        
+                        // [NEW] ユーザー要望により、「マージ済」のバッジ（インジケーター）表示を非表示（削除）に変更
+                        const mergedBadge = '';
+
+                        btn.innerHTML = `
+                            <div class="space-y-1">
+                                <div class="flex items-center flex-wrap gap-1">
+                                    <h3 class="text-[11px] font-bold text-slate-700 leading-tight">${item.displayTitle}</h3>
+                                    ${mergedBadge}
+                                </div>
+                                <div class="flex items-center gap-2 text-[8px] font-bold text-slate-300">
+                                    <span class="tabular-nums">${formatToReiwa(item.updated)}</span>
+                                    <span>|</span>
+                                    <span>${item.author}</span>
+                                </div>
+                            </div>
+                        `;
+                        btn.onclick = () => fetchDetail(item);
+                        container.appendChild(btn);
+                    });
+                }
+            });
+            lucide.createIcons();
+        }
+
+        function createProbBar(below, normal, above, kind = "気温") {
+            const labelBelow = ["降水量", "降雪量", "日照時間"].includes(kind) ? "少ない" : "低い";
+            const labelAbove = ["降水量", "降雪量", "日照時間"].includes(kind) ? "多い" : "高い";
+            return `
+                <div class="space-y-1 mt-3">
+                    <div class="prob-bar w-full">
+                        <div class="bg-blue-400" style="width: ${below}%"></div>
+                        <div class="bg-slate-300" style="width: ${normal}%"></div>
+                        <div class="bg-red-400" style="width: ${above}%"></div>
+                    </div>
+                    <div class="flex justify-between text-[9px] font-bold text-slate-400">
+                        <span class="${below >= 40 ? 'text-blue-600' : ''}">${labelBelow}: ${below}%</span>
+                        <span class="${normal >= 40 ? 'text-slate-600' : ''}">平年並: ${normal}%</span>
+                        <span class="${above >= 40 ? 'text-red-600' : ''}">${labelAbove}: ${above}%</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 合体した生XMLを切り替えるグローバル関数
+        window.switchRawXmlView = function(index) {
+            document.querySelectorAll('.raw-xml-content-box').forEach(box => box.classList.add('hidden'));
+            document.querySelectorAll('.raw-xml-tab-btn').forEach(btn => {
+                btn.classList.remove('bg-slate-800', 'text-white', 'border-slate-800');
+                btn.classList.add('bg-white', 'text-slate-500', 'border-slate-200');
+            });
+
+            document.getElementById(`raw-xml-box-${index}`).classList.remove('hidden');
+            const activeBtn = document.getElementById(`raw-xml-btn-${index}`);
+            activeBtn.classList.remove('bg-white', 'text-slate-500', 'border-slate-200');
+            activeBtn.classList.add('bg-slate-800', 'text-white', 'border-slate-800');
+        };
+
+        async function fetchDetail(item) {
+            const area = document.getElementById('contentArea');
+            area.classList.remove('hidden');
+            setTimeout(() => area.classList.remove('opacity-0', 'translate-y-4'), 10);
+            document.body.style.overflow = 'hidden';
+            
+            const container = document.getElementById('detailContainer');
+            container.innerHTML = `<div class="py-40 text-center w-full"><div class="inline-block h-4 w-4 border-2 border-slate-100 border-t-blue-500 rounded-full animate-spin"></div></div>`;
+
+            try {
+                const linksToFetch = item.links || [{ url: item.link, code: item.code }];
+                
+                const fetchResults = await Promise.allSettled(linksToFetch.map(async (l) => {
+                    const response = await fetch(l.url);
+                    const rawXmlText = await response.text();
+                    const xmlText = rawXmlText.replace(/<(\/?)(\w+):/g, '<$1');
+                    const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+                    return { code: l.code, rawXmlText, doc };
+                }));
+
+                let headline = "";
+                let bodyText = "";
+                let seasonalHtml = "";
+                let rawXmlContents = []; // デバッグ表示用に合体したXML群を保持
+
+                fetchResults.forEach(result => {
+                    if (result.status !== 'fulfilled') return;
+
+                    const { code, rawXmlText, doc } = result.value;
+                    rawXmlContents.push({ code, rawXmlText });
+
+                    // 見出し(Headline)の取得
+                    if (!headline) {
+                        headline = doc.getElementsByTagName('Headline')[0]?.getElementsByTagName('Text')[0]?.textContent || "";
+                        if (!headline || headline.trim() === "") {
+                            const earlyCondNode = doc.querySelector('Headline > Information > Item > Kind > Condition');
+                            if (earlyCondNode) headline = earlyCondNode.textContent;
+                        }
+                    }
+
+                    // 本文文章の優先マッピング
+                    const isPlaintextKind = code.endsWith('J50') || code.endsWith('J51') || code.endsWith('J52');
+                    const bodyPart = doc.getElementsByTagName('Body')[0];
+                    const commentTags = bodyPart?.getElementsByTagName('Comment');
+
+                    if (!bodyText || isPlaintextKind || (commentTags && commentTags.length > 0)) {
+                        let text = "";
+                        if (commentTags && commentTags.length > 0) {
+                            const texts = commentTags[0].getElementsByTagName('Text');
+                            for(let t of texts) { 
+                                if (t.getAttribute('type') === '本文' || !text) text = t.textContent; 
+                            }
+                        }
+                        const situationText = doc.getElementsByTagName('GeneralSituationText')[0]?.textContent;
+                        if (situationText) text = situationText + "\n\n" + text;
+                        
+                        if (!text) {
+                            text = bodyPart?.getElementsByTagName('Text')[0]?.textContent || "";
+                        }
+                        if (text && text.trim() !== "") {
+                            bodyText = text;
+                        }
+                    }
+
+                    // 早期天候情報の処理
+                    const earlyInfos = Array.from(doc.querySelectorAll('MeteorologicalInfos[type="早期天候情報"] > MeteorologicalInfo'));
+                    if (earlyInfos.length > 0) {
+                        let earlyHtml = `<div class="mt-8 space-y-6">`;
+                        earlyInfos.forEach(info => {
+                            const timeName = info.querySelector('Name')?.textContent || "";
+                            let conditionText = "";
+                            let cautionText = "";
+                            let targetArea = "";
+
+                            const items = info.querySelectorAll('Item');
+                            items.forEach(itemNode => {
+                                const kindName = itemNode.querySelector('Kind > Name')?.textContent;
+                                const propType = itemNode.querySelector('Kind > Property > Type')?.textContent;
+                                
+                                if (kindName === "要早期警戒") {
+                                    conditionText = itemNode.querySelector('SignificantClimateElement > Text')?.textContent || "";
+                                    targetArea = itemNode.querySelector('Area > Name')?.textContent || "";
+                                } else if (propType === "本文") {
+                                    cautionText = itemNode.querySelector('Property > Text')?.textContent || "";
+                                }
+                            });
+
+                            earlyHtml += `
+                                <div class="p-6 md:p-8 bg-red-50 border border-red-100 rounded-2xl space-y-4">
+                                    <div class="flex flex-col gap-1">
+                                        ${targetArea ? `<span class="text-[10px] md:text-xs font-black text-red-600 uppercase tracking-widest">${targetArea}</span>` : ''}
+                                        <span class="text-lg md:text-xl font-bold text-red-900">${timeName}</span>
+                                    </div>
+                                    ${conditionText ? `<div class="bg-white p-4 md:p-5 rounded-xl border border-red-100 text-sm md:text-base font-bold text-red-700 leading-relaxed shadow-sm">${conditionText}</div>` : ''}
+                                    ${cautionText ? `<div class="text-sm md:text-base text-slate-800 leading-relaxed whitespace-pre-wrap mt-4">${cautionText}</div>` : ''}
+                                </div>
+                            `;
+                        });
+                        earlyHtml += `</div>`;
+                        seasonalHtml += earlyHtml;
+                    }
+
+                    // 季節予報 (1か月、3か月など)
+                    const seasonalTimeDefines = Array.from(doc.querySelectorAll('MeteorologicalInfos[type="季節予報"] > TimeSeriesInfo > TimeDefines > TimeDefine')).map(td => ({
+                        id: td.getAttribute('timeId'),
+                        name: td.querySelector('Name')?.textContent
+                    }));
+
+                    const getTsTexts = () => {
+                        let texts = [];
+                        seasonalTimeDefines.forEach(td => {
+                            const kindNodes = doc.querySelectorAll(`MeteorologicalInfos[type="季節予報"] > TimeSeriesInfo > Item SignificantClimateElement > Text[refID="${td.id}"]`);
+                            kindNodes.forEach(node => {
+                                if(node.textContent) texts.push({ name: td.name, text: node.textContent });
+                            });
+                        });
+                        return texts;
+                    };
+
+                    const getInfoText = (kind) => {
+                        const textNodes = Array.from(doc.querySelectorAll(`MeteorologicalInfos[type="季節予報"] > MeteorologicalInfo > Item SignificantClimateElement[kind="${kind}"] > Text`));
+                        const node = textNodes.find(n => !n.getAttribute('refID'));
+                        return node ? node.textContent : "";
+                    };
+
+                    const timeSeriesItems = doc.querySelectorAll('MeteorologicalInfos[type="季節予報"] > TimeSeriesInfo > Item');
+                    const tsProbItems = Array.from(timeSeriesItems).filter(item => item.querySelector('ClimateProbabilityValues'));
+
+                    if (tsProbItems.length > 0 && seasonalTimeDefines.length > 0) {
+                        let sh = `<div class="mt-10 space-y-8">`;
+                        sh += `<h3 class="text-sm font-black text-slate-800 border-b border-slate-100 pb-2">期間別の予測</h3>`;
+                        
+                        const tsTexts = getTsTexts();
+                        if (tsTexts.length > 0) {
+                            sh += `<div class="p-4 md:p-5 bg-slate-50 border border-slate-100 rounded-xl space-y-3">`;
+                            tsTexts.forEach(t => {
+                                sh += `<div class="text-sm md:text-base font-bold text-slate-700 leading-relaxed"><span class="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs mr-2">${t.name}</span>${t.text}</div>`;
+                            });
+                            sh += `</div>`;
+                        }
+                        
+                        tsProbItems.forEach(tsItem => {
+                            const areaName = tsItem.querySelector('Area > Name')?.textContent;
+                            const probNodes = tsItem.querySelectorAll('ClimateProbabilityValues');
+                            
+                            if (probNodes.length > 0) {
+                                sh += `<div class="space-y-4">`;
+                                if (areaName && !item.displayTitle.includes(areaName)) {
+                                    sh += `<div class="text-xs md:text-sm font-black text-slate-600 border-b border-slate-100 pb-1">${areaName}</div>`;
+                                }
+                                
+                                sh += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">`;
+                                probNodes.forEach(pn => {
+                                    const refID = pn.getAttribute('refID');
+                                    const kind = pn.getAttribute('kind') || "気温";
+                                    const timeName = seasonalTimeDefines.find(td => td.id === refID)?.name || "期間";
+                                    const below = pn.querySelector('ProbabilityOfBelowNormal')?.textContent || "0";
+                                    const normal = pn.querySelector('ProbabilityOfNormal')?.textContent || "0";
+                                    const above = pn.querySelector('ProbabilityOfAboveNormal')?.textContent || "0";
+                                    
+                                    sh += `
+                                        <div class="p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
+                                            <div>
+                                                <div class="text-[10px] md:text-xs font-bold text-slate-400 mb-2">${timeName}</div>
+                                                <div class="text-sm font-black text-slate-700 mb-2">${kind}の確率</div>
+                                            </div>
+                                            ${createProbBar(below, normal, above, kind)}
+                                        </div>
+                                    `;
+                                });
+                                sh += `</div></div>`;
+                            }
+                        });
+                        sh += `</div>`;
+                        seasonalHtml += sh;
+                    }
+
+                    // 確率分布全体
+                    const infoItems = doc.querySelectorAll('MeteorologicalInfos[type="季節予報"] > MeteorologicalInfo > Item');
+                    if (infoItems.length > 0) {
+                        let overallHtml = `<div class="mt-12 space-y-8">`;
+                        overallHtml += `<h3 class="text-sm font-black text-slate-800 border-b border-slate-100 pb-2">向こうの確率分布</h3>`;
+                        
+                        const kinds = ["気温", "降水量", "日照時間", "降雪量"];
+                        kinds.forEach(kind => {
+                            const filtered = Array.from(infoItems).filter(i => {
+                                const probNode = i.querySelector('ClimateProbabilityValues');
+                                return probNode && probNode.getAttribute('kind') === kind;
+                            });
+                            
+                            if (filtered.length > 0) {
+                                overallHtml += `<div class="space-y-4">`;
+                                overallHtml += `<div><div class="text-[10px] md:text-xs font-black text-blue-500 bg-blue-50 px-3 py-1.5 rounded-md inline-block uppercase tracking-widest">${kind}</div></div>`;
+                                
+                                const descText = getInfoText(kind);
+                                if (descText) {
+                                    overallHtml += `<div class="text-sm md:text-base font-bold text-slate-700 bg-slate-50 p-4 md:p-5 rounded-xl border border-slate-100 leading-relaxed">${descText}</div>`;
+                                }
+
+                                overallHtml += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">`;
+                                
+                                filtered.forEach(fi => {
+                                    const areaName = fi.querySelector('Area > Name')?.textContent;
+                                    const probNode = fi.querySelector('ClimateProbabilityValues');
+                                    const below = probNode.querySelector('ProbabilityOfBelowNormal')?.textContent || "0";
+                                    const normal = probNode.querySelector('ProbabilityOfNormal')?.textContent || "0";
+                                    const above = probNode.querySelector('ProbabilityOfAboveNormal')?.textContent || "0";
+                                    
+                                    overallHtml += `
+                                        <div class="p-5 bg-white border border-slate-100 rounded-xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                                            <div>
+                                                <div class="text-xs md:text-sm font-bold text-slate-600 mb-2">${areaName}</div>
+                                            </div>
+                                            ${createProbBar(below, normal, above, kind)}
+                                        </div>
+                                    `;
+                                });
+                                overallHtml += `</div></div>`;
+                            }
+                        });
+                        seasonalHtml += overallHtml + `</div>`;
+                    }
+
+                    // 2週間気温予報（区域予報）
+                    const regionalInfos = Array.from(doc.querySelectorAll('MeteorologicalInfos[type="区域予報"]'));
+                    if (regionalInfos.length > 0) {
+                        let sh = `<div class="mt-12 space-y-4">`;
+                        sh += `<h3 class="text-sm font-black text-slate-800 border-b border-slate-100 pb-2">区域予報（地域平均気温）</h3>`;
+                        
+                        let regionalGroups = {};
+
+                        regionalInfos.forEach(info => {
+                            const rTimeDefines = Array.from(info.querySelectorAll('TimeDefines > TimeDefine')).map(td => ({
+                                id: td.getAttribute('timeId'),
+                                name: td.querySelector('Name')?.textContent
+                            }));
+                            
+                            const items = info.querySelectorAll('TimeSeriesInfo > Item');
+                            items.forEach(itemNode => {
+                                const areaName = itemNode.querySelector('Area > Name')?.textContent;
+                                if (!areaName) return;
+                                
+                                let regionName = AREA_TO_REGION[areaName];
+                                if (!regionName) {
+                                    if (COMMON_REGION_ORDER.includes(areaName)) {
+                                        regionName = areaName;
+                                    } else if (areaName.includes("北海道")) {
+                                        regionName = "北海道地方";
+                                    } else if (areaName.includes("東北")) {
+                                        regionName = "東北地方";
+                                    } else if (areaName.includes("近畿")) {
+                                        regionName = "近畿地方";
+                                    } else {
+                                        regionName = "その他";
+                                    }
+                                }
+
+                                if (!regionalGroups[regionName]) regionalGroups[regionName] = "";
+
+                                let itemHtml = `<div class="p-5 lg:p-6 bg-white rounded-xl border border-slate-100 shadow-sm mb-4">`;
+                                itemHtml += `<h4 class="text-xs md:text-sm font-bold text-slate-700 mb-4">${areaName}</h4>`;
+                                itemHtml += `<div class="overflow-x-auto custom-scrollbar pb-3"><div class="flex gap-3 min-w-max">`;
+                                
+                                rTimeDefines.forEach(td => {
+                                    const compNode = itemNode.querySelector(`Comparison[refID="${td.id}"]`);
+                                    const desc = compNode ? compNode.getAttribute('description') : "なし";
+                                    let badgeClass = "bg-slate-100 text-slate-500";
+                                    if (desc.includes('高い')) badgeClass = "bg-red-50 text-red-600 border border-red-100";
+                                    else if (desc.includes('低い')) badgeClass = "bg-blue-50 text-blue-600 border border-blue-100";
+                                    
+                                    itemHtml += `
+                                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-4 w-auto flex-shrink-0 flex flex-col justify-between shadow-sm">
+                                            <div class="text-[10px] md:text-xs text-slate-400 font-bold mb-3 whitespace-nowrap text-center" title="${td.name}">${td.name}</div>
+                                            <div class="text-xs font-bold text-center px-2 py-1.5 rounded whitespace-nowrap ${badgeClass}">${desc}</div>
+                                        </div>
+                                    `;
+                                });
+                                itemHtml += `</div></div></div>`;
+                                regionalGroups[regionName] += itemHtml;
+                            });
+                        });
+
+                        COMMON_REGION_ORDER.forEach(region => {
+                            if (regionalGroups[region]) {
+                                sh += `
+                                    <details class="group bg-slate-50 border border-slate-100 rounded-xl overflow-hidden mb-4">
+                                        <summary class="p-4 flex items-center justify-between font-bold text-slate-700 cursor-pointer outline-none hover:bg-slate-100 transition-colors">
+                                            <span>${region}</span>
+                                            <i data-lucide="chevron-down" class="w-5 h-5 text-slate-400 transition-transform duration-200 group-open:rotate-180"></i>
+                                        </summary>
+                                        <div class="p-4 pt-0 space-y-4">
+                                            ${regionalGroups[region]}
+                                        </div>
+                                    </details>
+                                `;
+                            }
+                        });
+
+                        sh += `</div>`;
+                        seasonalHtml += sh;
+                    }
+
+                    // 2週間気温予報（地点予報）
+                    const stationInfos = Array.from(doc.querySelectorAll('MeteorologicalInfos[type="地点予報"]'));
+                    if (stationInfos.length > 0) {
+                        let sh = `<div class="mt-12 space-y-4">`;
+                        sh += `<h3 class="text-sm font-black text-slate-800 border-b border-slate-100 pb-2">地点予報（最高・最低気温）</h3>`;
+                        
+                        let regionGroups = {};
+
+                        stationInfos.forEach(info => {
+                            const sTimeDefines = Array.from(info.querySelectorAll('TimeDefines > TimeDefine')).map(td => ({
+                                id: td.getAttribute('timeId'),
+                                name: td.querySelector('Name')?.textContent
+                            }));
+                            
+                            const items = info.querySelectorAll('TimeSeriesInfo > Item');
+                            items.forEach(itemNode => {
+                                const stationName = itemNode.querySelector('Station > Name')?.textContent;
+                                if (!stationName) return;
+                                
+                                const regionName = STATION_TO_REGION[stationName] || "その他";
+                                if (!regionGroups[regionName]) regionGroups[regionName] = "";
+
+                                let itemHtml = `<div class="p-5 lg:p-6 bg-white rounded-xl border border-slate-100 shadow-sm mb-4">`;
+                                itemHtml += `<h4 class="text-xs md:text-sm font-bold text-slate-700 mb-4">${stationName}</h4>`;
+                                itemHtml += `<div class="overflow-x-auto custom-scrollbar pb-3"><div class="flex gap-3 min-w-max">`;
+                                
+                                sTimeDefines.forEach(td => {
+                                    const getMax = (type) => {
+                                        const prop = Array.from(itemNode.querySelectorAll('Property')).find(p => p.querySelector('Type')?.textContent === type);
+                                        if (!prop) return "-";
+                                        const tempNode = prop.querySelector(`Temperature[refID="${td.id}"]`);
+                                        return tempNode ? tempNode.textContent : "-";
+                                    };
+                                    
+                                    const maxTemp = getMax('最高気温');
+                                    const minTemp = getMax('最低気温');
+                                    
+                                    itemHtml += `
+                                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-4 w-auto flex-shrink-0 flex flex-col justify-between text-center">
+                                            <div class="text-[10px] md:text-xs text-slate-400 font-bold mb-3 whitespace-nowrap text-center" title="${td.name}">${td.name}</div>
+                                            <div class="flex justify-center gap-2 text-base lg:text-lg font-black whitespace-nowrap">
+                                                <span class="text-blue-600">${minTemp}</span>
+                                                <span class="text-slate-300">/</span>
+                                                <span class="text-red-600">${maxTemp}</span>
+                                            </div>
+                                        </div>
+                                    `;
+                                });
+                                itemHtml += `</div></div></div>`;
+                                regionGroups[regionName] += itemHtml;
+                            });
+                        });
+
+                        COMMON_REGION_ORDER.forEach(region => {
+                            if (regionGroups[region]) {
+                                sh += `
+                                    <details class="group bg-slate-50 border border-slate-100 rounded-xl overflow-hidden mb-4">
+                                        <summary class="p-4 flex items-center justify-between font-bold text-slate-700 cursor-pointer outline-none hover:bg-slate-100 transition-colors">
+                                            <span>${region}</span>
+                                            <i data-lucide="chevron-down" class="w-5 h-5 text-slate-400 transition-transform duration-200 group-open:rotate-180"></i>
+                                        </summary>
+                                        <div class="p-4 pt-0 space-y-4">
+                                            ${regionGroups[region]}
+                                        </div>
+                                    </details>
+                                `;
+                            }
+                        });
+
+                        sh += `</div>`;
+                        seasonalHtml += sh;
+                    }
+
+                    // 全般海上警報（台風・熱帯低気圧の進路図）
+                    const marineInfos = Array.from(doc.querySelectorAll('MeteorologicalInfos[type="全般海上警報"] > MeteorologicalInfo'));
+                    if (marineInfos.length > 0) {
+                        let typhoonHtml = `<div class="mt-8 space-y-6">`;
+                        marineInfos.forEach(info => {
+                            const items = info.querySelectorAll('Item');
+                            items.forEach(itemNode => {
+                                const nameNode = itemNode.querySelector('Kind > Property > TyphoonNamePart');
+                                const alarmName = itemNode.querySelector('Kind > Name')?.textContent || "海上警報";
+                                const className = itemNode.querySelector('Kind > ClassName')?.textContent || "";
+                                
+                                let nameAsia = nameNode?.querySelector('Name')?.textContent || "";
+                                let nameKana = nameNode?.querySelector('NameKana')?.textContent || "";
+                                let nameNum = nameNode?.querySelector('Number')?.textContent || "";
+
+                                if (nameAsia) {
+                                    typhoonHtml += `
+                                        <div class="p-6 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-center justify-between mb-4">
+                                            <div class="space-y-1">
+                                                <span class="px-2 py-0.5 bg-blue-600 text-white font-bold rounded text-[9px] uppercase tracking-wider">${className || '熱帯じょう乱'}</span>
+                                                <h3 class="text-xl font-black text-slate-800">${nameKana} (${nameAsia})</h3>
+                                                <p class="text-xs text-slate-400 font-bold">台風第 ${nameNum ? nameNum.substring(2) : '--'} 号</p>
+                                            </div>
+                                            <div class="text-right">
+                                                <span class="text-xs font-bold text-red-500 bg-red-50 border border-red-100 px-3 py-1 rounded-full">${alarmName}</span>
+                                            </div>
+                                        </div>`;
+                                }
+
+                                typhoonHtml += `<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">`;
+                                const kinds = itemNode.querySelectorAll('Kind');
+                                kinds.forEach(kindNode => {
+                                    const datetimeType = kindNode.querySelector('DateTime')?.getAttribute('type') || kindNode.getAttribute('type') || "";
+                                    if (!datetimeType || datetimeType === "呼称") return;
+
+                                    const centerPart = kindNode.querySelector('Property > CenterPart');
+                                    const windPart = kindNode.querySelector('Property > WindPart');
+
+                                    if (centerPart || windPart) {
+                                        const coordinate = centerPart?.querySelector('Coordinate')?.textContent || centerPart?.querySelector('BasePoint')?.textContent || "";
+                                        const location = centerPart?.querySelector('Location')?.textContent || "";
+                                        const direction = centerPart?.querySelector('Direction')?.textContent || "";
+                                        const speed = centerPart?.querySelector('Speed')?.textContent || "";
+                                        const pressure = centerPart?.querySelector('Pressure')?.textContent || "";
+                                        const maxWind = windPart?.querySelector('WindSpeed[type="最大風速"]')?.textContent || "";
+
+                                        let bgClass = "bg-white border-slate-100";
+                                        let badgeColor = "bg-slate-100 text-slate-600";
+                                        if (datetimeType.includes("実況")) {
+                                            bgClass = "bg-slate-50 border-blue-200/60 ring-1 ring-blue-50";
+                                            badgeColor = "bg-blue-600 text-white";
+                                        } else if (datetimeType.includes("予報")) {
+                                            bgClass = "bg-white border-slate-100";
+                                            badgeColor = "bg-indigo-50 text-indigo-700 border border-indigo-100";
+                                        }
+
+                                        typhoonHtml += `
+                                            <div class="p-5 border rounded-2xl flex flex-col justify-between shadow-sm hover:shadow-md transition-all ${bgClass}">
+                                                <div class="space-y-3">
+                                                    <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                                                        <span class="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${badgeColor}">${datetimeType}</span>
+                                                        <span class="text-[10px] text-slate-400 font-bold">${location || '洋上'}</span>
+                                                    </div>
+                                                    <div class="space-y-2 text-xs">
+                                                        ${coordinate ? `<p class="text-slate-500 font-bold flex items-center gap-1"><i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400"></i> 位置: ${coordinate.replace(/\//g, '').replace(/\+/g, ' ')}</p>` : ''}
+                                                        ${direction && speed ? `<p class="text-slate-500 font-bold flex items-center gap-1"><i data-lucide="navigation" class="w-3.5 h-3.5 text-slate-400"></i> 移動: ${direction}へ ${speed}</p>` : ''}
+                                                    </div>
+                                                </div>
+                                                <div class="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2 text-center">
+                                                    <div class="bg-slate-50/50 p-2 rounded-lg">
+                                                        <span class="text-[9px] text-slate-400 font-bold block">中心気圧</span>
+                                                        <span class="text-sm font-black text-slate-700">${pressure ? pressure.match(/\d+/)?.[0] || pressure : '--'}<span class="text-[10px] font-medium ml-0.5">hPa</span></span>
+                                                    </div>
+                                                    <div class="bg-slate-50/50 p-2 rounded-lg">
+                                                        <span class="text-[9px] text-slate-400 font-bold block">最大風速</span>
+                                                        <span class="text-sm font-black text-blue-600">${maxWind || '--'}<span class="text-[10px] font-medium ml-0.5">kt</span></span>
+                                                    </div>
+                                                </div>
+                                            </div>`;
+                                    }
+                                });
+                                typhoonHtml += `</div>`;
+                            });
+                        });
+                        typhoonHtml += `</div>`;
+                        seasonalHtml += typhoonHtml;
+                    }
+
+                    // 地方海上警報の解析
+                    const warningItems = Array.from(doc.querySelectorAll('Warning[type="地方海上警報"] > Item'));
+                    if (warningItems.length > 0) {
+                        let warningHtml = `<div class="mt-8 space-y-6">`;
+                        warningHtml += `<h3 class="text-sm font-black text-slate-800 border-b border-slate-100 pb-2">海域別の警報・情報</h3>`;
+
+                        let areaWarnings = {};
+                        warningItems.forEach(itemNode => {
+                            const areaName = itemNode.querySelector('Area > Name')?.textContent;
+                            if (!areaName) return;
+
+                            if (!areaWarnings[areaName]) areaWarnings[areaName] = [];
+
+                            const alarmName = itemNode.querySelector('Kind > Name')?.textContent || "";
+                            const sentence = itemNode.querySelector('Kind > Property > WindPart > SubArea > Sentence')?.textContent || 
+                                             itemNode.querySelector('Kind > Property > VisibilityPart > SubArea > Sentence')?.textContent || "";
+                            
+                            const windDir = itemNode.querySelector('Kind > Property > WindPart > SubArea > Base > WindDirection')?.textContent || "";
+                            const windSpeedKnots = itemNode.querySelector('Kind > Property > WindPart > SubArea > Base > WindSpeed[unit="ノット"]')?.textContent || "";
+                            const windSpeedMeters = itemNode.querySelector('Kind > Property > WindPart > SubArea > Base > WindSpeed[unit="m/s"]')?.textContent || "";
+                            const visibilityKm = itemNode.querySelector('Kind > Property > VisibilityPart > SubArea > Base > Visibility[unit="km"]')?.textContent || "";
+
+                            areaWarnings[areaName].push({
+                                alarmName,
+                                sentence,
+                                windDir,
+                                windSpeedKnots,
+                                windSpeedMeters,
+                                visibilityKm
+                            });
+                        });
+
+                        warningHtml += `<div class="grid grid-cols-1 md:grid-cols-2 gap-6">`;
+                        for (const [areaName, alarms] of Object.entries(areaWarnings)) {
+                            warningHtml += `
+                                <div class="p-6 bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-all space-y-4">
+                                    <div class="flex items-center justify-between border-b border-slate-50 pb-2.5">
+                                        <h4 class="text-sm font-black text-slate-800 flex items-center gap-1.5">
+                                            <i data-lucide="anchor" class="w-4 h-4 text-blue-500"></i>
+                                            <span>${areaName}</span>
+                                        </h4>
+                                        <div class="flex flex-wrap gap-1">
+                                            ${alarms.map(a => {
+                                                let badgeColor = "bg-slate-100 text-slate-600";
+                                                if (a.alarmName.includes("強風")) badgeColor = "bg-amber-50 text-amber-700 border border-amber-100";
+                                                else if (a.alarmName.includes("暴風")) badgeColor = "bg-red-50 text-red-700 border border-red-100";
+                                                else if (a.alarmName.includes("濃霧")) badgeColor = "bg-purple-50 text-purple-700 border border-purple-100";
+                                                return `<span class="px-2 py-0.5 rounded text-[9px] font-bold ${badgeColor}">${a.alarmName}</span>`;
+                                            }).join('')}
+                                        </div>
+                                    </div>
+                                    <div class="space-y-3">
+                                        ${alarms.map(a => {
+                                            return `
+                                                <div class="space-y-1">
+                                                    <p class="text-xs text-slate-600 leading-relaxed font-medium bg-slate-50/50 p-3 rounded-xl border border-slate-100/50">${a.sentence}</p>
+                                                    <div class="flex flex-wrap gap-3 text-[10px] text-slate-400 font-bold px-1">
+                                                        ${a.windDir ? `<span>風向: <span class="text-slate-600">${a.windDir}</span></span>` : ''}
+                                                        ${a.windSpeedKnots ? `<span>最大風速: <span class="text-slate-600">${a.windSpeedKnots}kt (${a.windSpeedMeters}m/s)</span></span>` : ''}
+                                                        ${a.visibilityKm ? `<span>視程: <span class="text-purple-600">${a.visibilityKm}km 以下</span></span>` : ''}
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('<hr class="border-slate-50 my-2" />')}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        warningHtml += `</div></div>`;
+                        seasonalHtml += warningHtml;
+                    }
+
+                    // 気象要因（Synopsis）
+                    const synopsisText = doc.querySelector('MeteorologicalInfos[type="気象要因"] > MeteorologicalInfo > Item > Kind > Property > SynopsisPart > Synopsis')?.textContent;
+                    if (synopsisText) {
+                        let synHtml = `<div class="mt-12 p-6 md:p-8 bg-slate-900 text-slate-100 rounded-2xl shadow-inner space-y-4">`;
+                        synHtml += `
+                            <div class="flex items-center gap-2 border-b border-slate-800 pb-3">
+                                <i data-lucide="compass" class="w-5 h-5 text-blue-400"></i>
+                                <h4 class="text-xs md:text-sm font-black uppercase tracking-wider text-slate-300">気象要因概況 (Synopsis)</h4>
+                            </div>
+                            <ul class="space-y-2 text-xs md:text-sm font-mono leading-relaxed text-slate-300">`;
+                        
+                        const lines = synopsisText.split('\n');
+                        lines.forEach(line => {
+                            if (line.trim()) {
+                                synHtml += `<li class="flex items-start gap-2"><span class="text-blue-500 mt-1">■</span><span>${line.trim()}</span></li>`;
+                            }
+                        });
+
+                        synHtml += `</ul></div>`;
+                        seasonalHtml += synHtml;
+                    }
+                });
+
+                // 生データXMLセクション
+                const rawDataSection = `
+                    <div id="rawDataSection" class="pt-10 space-y-4 hidden w-full">
+                        <div class="flex items-center justify-between border-t border-slate-100 pt-8 flex-wrap gap-4">
+                            <div class="flex items-center gap-2 text-slate-400">
+                                <i data-lucide="code-2" class="w-4 h-4 text-blue-500"></i>
+                                <h4 class="text-[10px] md:text-xs font-black uppercase tracking-widest text-slate-600">生データ (Raw XML)</h4>
+                            </div>
+                            <div class="flex gap-2">
+                                ${rawXmlContents.map((xml, idx) => `
+                                    <button onclick="switchRawXmlView(${idx})" id="raw-xml-btn-${idx}" class="raw-xml-tab-btn px-2.5 py-1 text-[10px] font-bold rounded border ${idx === 0 ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200'}">
+                                        ${xml.code || `データ${idx+1}`}
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ${rawXmlContents.map((xml, idx) => `
+                            <div id="raw-xml-box-${idx}" class="raw-xml-content-box ${idx === 0 ? '' : 'hidden'}">
+                                <div class="raw-data-box custom-scrollbar w-full">${escapeHtml(xml.rawXmlText)}</div>
+                            </div>
+                        `).join('')}
+                    </div>`;
+
+                container.innerHTML = `
+                    <div class="fade-in space-y-10 w-full">
+                        <header class="space-y-4 pb-8 text-left border-b border-slate-50 w-full">
+                            <h2 class="text-2xl md:text-3xl font-black text-slate-800 leading-tight">${item.displayTitle}</h2>
+                            <div class="flex items-center gap-3 text-xs md:text-sm font-bold text-slate-400">
+                                <span class="flex items-center gap-1"><i data-lucide="building" class="w-4 h-4"></i> ${item.author}</span>
+                                <span>/</span>
+                                <span>${formatToReiwa(item.updated)} 発表</span>
+                            </div>
+                        </header>
+                        ${headline ? `<div class="p-6 md:p-8 bg-slate-50 rounded-2xl border border-slate-100/50 shadow-sm"><p class="text-slate-700 font-bold leading-relaxed whitespace-pre-wrap text-sm md:text-base">${headline}</p></div>` : ''}
+                        ${bodyText && bodyText !== "詳細データなし" ? `<article class="text-left weather-text text-slate-600 text-base md:text-lg whitespace-pre-wrap mt-8">${bodyText}</article>` : ''}
+                        ${seasonalHtml}
+                        ${rawDataSection}
+                    </div>`;
+                lucide.createIcons();
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = `<p class="text-center py-20 text-slate-400 text-sm font-bold">読み込みに失敗しました。</p>`;
+            }
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        function closeDetail() {
+            const area = document.getElementById('contentArea');
+            area.classList.add('opacity-0', 'translate-y-4');
+            setTimeout(() => { 
+                area.classList.add('hidden'); 
+                if (document.getElementById('telegramsModal').classList.contains('hidden')) {
+                    document.body.style.overflow = 'auto'; 
+                }
+            }, 200);
+        }
+
+        /* ==========================================================================
+           デバッグ用電文モーダルロジック
+           ========================================================================== */
+        function toggleTelegramsModal() {
+            const modal = document.getElementById('telegramsModal');
+            if (modal.classList.contains('hidden')) {
+                document.getElementById('telegramsSearch').value = ""; 
+                renderTelegramsList();
+                modal.classList.remove('hidden');
+                document.body.style.overflow = 'hidden'; 
+            } else {
+                modal.classList.add('hidden');
+                if (document.getElementById('contentArea').classList.contains('hidden')) {
+                    document.body.style.overflow = 'auto';
+                }
+            }
+        }
+
+        function renderTelegramsList(filterText = "") {
+            const tbody = document.getElementById('telegramsTableBody');
+            const countSpan = document.getElementById('telegramsCount');
+            tbody.innerHTML = "";
+
+            const filtered = allFetchedEntries.filter(item => {
+                const query = filterText.toLowerCase();
+                const titleMatch = item.displayTitle.toLowerCase().includes(query);
+                const codeMatch = item.code.toLowerCase().includes(query);
+                const authorMatch = item.author.toLowerCase().includes(query);
+                return titleMatch || codeMatch || authorMatch;
+            });
+
+            countSpan.innerText = filtered.length;
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="py-12 text-center text-slate-400 italic font-medium">
+                            該当する生電文はありませんでした（検索ワード: "${filterText}"）
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            filtered.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition-colors border-b border-slate-100 text-[11px]";
+
+                let feedName = "その他";
+                if (item.link.includes("regular")) feedName = "定時";
+                else if (item.link.includes("extra")) feedName = "随時";
+                else if (item.link.includes("other")) feedName = "その他";
+
+                const feedBadge = feedName === "定時" 
+                    ? `<span class="bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded text-[9px] font-bold">定時</span>`
+                    : feedName === "随時"
+                    ? `<span class="bg-amber-50 text-amber-700 border border-amber-100 px-1.5 py-0.5 rounded text-[9px] font-bold">随時</span>`
+                    : `<span class="bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] font-bold">その他</span>`;
+
+                const codeBadge = `<span class="font-mono bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded text-[9px] font-bold">${item.code}</span>`;
+
+                tr.innerHTML = `
+                    <td class="py-3 pl-2">${codeBadge}</td>
+                    <td class="py-3">${feedBadge}</td>
+                    <td class="py-3 font-bold text-slate-700 max-w-xs truncate" title="${item.displayTitle}">${item.displayTitle}</td>
+                    <td class="py-3 tabular-nums text-slate-400">${formatToReiwa(item.updated)}</td>
+                    <td class="py-3 text-slate-500 font-medium">${item.author}</td>
+                    <td class="py-3 pr-2 text-right space-x-2">
+                        <button onclick="viewTelegramFromModal('${item.link}')" class="text-blue-600 hover:text-blue-800 font-bold transition-colors">解析表示</button>
+                        <a href="${item.link}" target="_blank" class="text-slate-400 hover:text-slate-600 transition-colors inline-flex items-center gap-0.5" title="気象庁の生XMLを新しいタブで表示">
+                            <span>XML</span>
+                            <i data-lucide="external-link" class="w-3 h-3"></i>
+                        </a>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            lucide.createIcons();
+        }
+
+        function filterTelegrams() {
+            const query = document.getElementById('telegramsSearch').value;
+            renderTelegramsList(query);
+        }
+
+        function viewTelegramFromModal(link) {
+            const item = allFetchedEntries.find(e => e.link === link);
+            if (item) {
+                document.getElementById('telegramsModal').classList.add('hidden');
+                fetchDetail(item);
+            }
+        }
+
+        // キーボード操作のリスナー
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.key === 'f' || e.key === 'F') {
+                const detailArea = document.getElementById('contentArea');
+                const rawDataSection = document.getElementById('rawDataSection');
+
+                if (!detailArea.classList.contains('hidden') && rawDataSection) {
+                    rawDataSection.classList.toggle('hidden');
+                } else {
+                    toggleTelegramsModal();
+                }
+            }
+        });
+
+        window.onload = fetchFeeds;
+    </script>
+</body>
+</html>

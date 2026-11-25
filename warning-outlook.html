@@ -1,0 +1,1662 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EWC 警報級の可能性</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700;800&display=swap');
+        
+        body { font-family: 'Noto Sans JP', sans-serif; background-color: #f8fafc; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        #fullScreenLoading {
+            position: fixed;
+            inset: 0;
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: opacity 0.5s ease-out;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+            background: #bae6fd;
+            z-index: 1;
+        }
+
+        .map-legend {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .leaflet-interactive {
+            transition: fill-opacity 0.2s, stroke-width 0.1s;
+            outline: none;
+        }
+        
+        /* バッジとテーブルのスタイル */
+        .rank-high { color: #ffffff; background-color: #dc2626; border-radius: 4px; padding: 2px 6px; font-weight: 900; font-size: 9px; display: inline-block; white-space: nowrap; box-shadow: 0 2px 4px rgba(220,38,38,0.15); }
+        .rank-mid { color: #7f1d1d; background-color: #fca5a5; border-radius: 4px; padding: 2px 6px; font-weight: 900; font-size: 9px; display: inline-block; white-space: nowrap; }
+        .rank-text-none { color: #cbd5e1; font-size: 9px; font-weight: 700; }
+
+        .analysis-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        .analysis-table th, .analysis-table td {
+            padding: 8px 6px;
+            text-align: center;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .analysis-table th:first-child, .analysis-table td:first-child {
+            text-align: left;
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            font-weight: 800;
+            padding-left: 10px;
+            min-width: 110px;
+            border-right: 1px solid #f1f5f9;
+        }
+        
+        .number-highlight {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 800;
+            color: #1d4ed8;
+            font-size: 1.05em;
+            margin: 0 0.15em;
+            letter-spacing: -0.05em;
+        }
+
+        /* マトリックス表示専用スタイル（横スクロールなし w-full table-fixed 化） */
+        .matrix-table {
+            border-collapse: separate;
+            border-spacing: 0;
+            table-layout: fixed;
+            width: 100%;
+        }
+        .matrix-table th, .matrix-table td {
+            border-bottom: 1px solid #e2e8f0;
+            border-right: 1px solid #e2e8f0;
+            word-break: break-all; /* 入り切らないテキストの自然な改行を許可 */
+        }
+        .matrix-sticky-col {
+            position: sticky;
+            left: 0;
+            z-index: 20;
+            background-color: #f8fafc;
+            border-right: 2px solid #cbd5e1 !important;
+            font-weight: 900;
+        }
+        .matrix-sticky-header {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            background-color: #f1f5f9;
+            border-bottom: 2px solid #cbd5e1 !important;
+        }
+        .matrix-sticky-corner {
+            position: sticky;
+            top: 0;
+            left: 0;
+            z-index: 40;
+            background-color: #e2e8f0;
+            border-right: 2px solid #cbd5e1 !important;
+            border-bottom: 2px solid #cbd5e1 !important;
+        }
+
+        /* セル内コンテナ：高さを固定せず、バッジが増えたら自動で改行して下に広げる */
+        .matrix-cell-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            justify-content: center;
+            align-items: center;
+            padding: 2px 0;
+        }
+    </style>
+</head>
+<body class="text-slate-900 min-h-screen flex flex-col overflow-hidden">
+
+    <!-- ローディング画面 -->
+    <div id="fullScreenLoading">
+        <div class="text-center px-6 w-full max-sm:px-4">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mb-6"></div>
+            <h2 class="text-xl font-black text-slate-800 mb-2">気象庁データ解析中</h2>
+            <p id="loadingMessage" class="text-sm text-slate-500 font-bold mb-4">XMLフィードから電文を取得中...</p>
+        </div>
+    </div>
+
+    <!-- 取得電文一覧モーダル (eキーで表示) -->
+    <div id="feedListModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] hidden flex justify-center items-center p-4 md:p-8 transition-opacity">
+        <div class="bg-white w-full max-w-5xl h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+            <div class="p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+                <h2 class="text-xl font-black text-slate-800 flex items-center gap-2 italic">
+                    <i data-lucide="list-tree" class="w-6 h-6 text-blue-600"></i> 
+                    取得電文一覧 <span class="text-sm font-bold text-slate-500 not-italic ml-2">(<span id="feedCount" class="text-blue-600">0</span>件)</span>
+                </h2>
+                <button onclick="hideAllFeedsModal()" class="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-0 custom-scrollbar bg-white">
+                <table class="w-full text-left border-collapse">
+                    <thead class="sticky top-0 bg-slate-100 shadow-sm z-10 text-[11px] text-slate-500 uppercase tracking-widest">
+                        <tr>
+                            <th class="p-4 font-black">発表日時</th>
+                            <th class="p-4 font-black">発表官署</th>
+                            <th class="p-4 font-black">タイトル</th>
+                            <th class="p-4 font-black text-center">XML</th>
+                        </tr>
+                    </thead>
+                    <tbody id="feedListTableBody" class="divide-y divide-slate-100">
+                        <!-- JSで生成 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 警報リスク地域一覧モーダル (rキーで表示) -->
+    <div id="riskListModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] hidden flex justify-center items-center p-4 md:p-8 transition-opacity">
+        <div class="bg-white w-full max-w-5xl h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+            <div class="p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+                <h2 class="text-xl font-black text-slate-800 flex items-center gap-2 italic">
+                    <i data-lucide="alert-triangle" class="w-6 h-6 text-red-600"></i> 
+                    警報級の可能性がある地域 <span class="text-sm font-bold text-slate-500 not-italic ml-2">(<span id="riskCount" class="text-red-600">0</span>地域)</span>
+                </h2>
+                <button onclick="hideRiskListModal()" class="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar bg-slate-50">
+                <div id="riskListContent" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <!-- JSで生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex-1 flex flex-col h-screen max-h-screen overflow-hidden">
+        <!-- ヘッダー -->
+        <header class="bg-white border-b border-slate-200 p-2 md:p-2.5 shrink-0 shadow-sm z-50">
+            <div class="max-w-7xl mx-auto flex items-center justify-between gap-2 md:gap-4">
+                <div class="flex items-center gap-2">
+                    <button id="headerBackButton" onclick="handleGlobalBack()" class="px-2 py-1 hover:bg-slate-100 rounded-lg transition-colors group text-xs font-bold text-slate-600 hover:text-blue-600 hidden">
+                        ←戻る
+                    </button>
+                    <h1 class="text-sm md:text-lg font-black text-slate-900 tracking-tighter leading-none italic flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 bg-blue-600 rounded-full"></span>
+                        EWC気象情報（警報級の可能性）
+                    </h1>
+                </div>
+
+                <div class="flex items-center gap-2 md:gap-4 overflow-hidden">
+                    <span id="lastUpdate" class="text-[9px] text-slate-400 font-bold hidden sm:inline whitespace-nowrap"></span>
+                    
+                    <button onclick="showRiskListModal()" class="px-2 py-1 rounded-lg text-[9px] font-black transition-all bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 shadow-sm shrink-0 flex items-center gap-1">
+                        <i data-lucide="alert-triangle" class="w-3 h-3"></i> リスク一覧
+                    </button>
+                    
+                    <div id="viewToggle" class="flex bg-slate-100 p-0.5 rounded-lg shrink-0">
+                        <button onclick="switchView('map')" id="btnMap" class="px-2 py-1 rounded-md text-[9px] font-black transition-all bg-white text-blue-600 shadow-sm shrink-0">地図</button>
+                        <!-- 一括表示は初期状態で非表示 (hidden) -->
+                        <button onclick="switchView('matrix')" id="btnMatrix" class="px-2 py-1 rounded-md text-[9px] font-black transition-all text-slate-500 hover:text-slate-700 shrink-0 hidden">一括表示</button>
+                        <!-- 地域一覧にダブルタップ＆ダブルクリックイベントを設定 -->
+                        <button onclick="handleListClick()" ondblclick="unlockMatrixView()" id="btnList" class="px-2 py-1 rounded-md text-[9px] font-black transition-all text-slate-500 hover:text-slate-700 shrink-0 select-none" title="ダブルクリックで一括表示を解放">地域一覧</button>
+                    </div>
+                    <button onclick="init()" class="p-1 hover:bg-slate-100 rounded-full transition-colors shrink-0 border border-slate-200" title="更新">
+                        <i data-lucide="refresh-cw" class="w-3 h-3 text-slate-600"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-hidden relative bg-slate-50 flex w-full">
+            <!-- 左ペイン（地図 or マトリックス or 一覧表示） -->
+            <div id="leftPane" class="flex-1 relative transition-all duration-300 ease-in-out min-w-0">
+                
+                <!-- 地図表示ページ -->
+                <div id="mapView" class="absolute inset-0">
+                    <div id="map"></div>
+
+                    <!-- 凡例 -->
+                    <div id="mapLegend" class="absolute bottom-6 left-4 md:left-6 z-[1000] map-legend space-y-1 pointer-events-none">
+                        <div class="text-[8px] font-black text-slate-500 mb-1 uppercase tracking-widest">警報級の可能性</div>
+                        <div class="flex items-center gap-1.5 text-[9px] font-bold text-slate-800">
+                            <span class="w-2.5 h-2.5 rounded-[2px] bg-[#dc2626] shadow-inner"></span> 高い
+                        </div>
+                        <div class="flex items-center gap-1.5 text-[9px] font-bold text-slate-800 mt-1">
+                            <span class="w-2.5 h-2.5 rounded-[2px] bg-[#fca5a5] shadow-inner"></span> 中程度
+                        </div>
+                        <div class="flex items-center gap-1.5 text-[9px] font-bold text-slate-800 mt-1">
+                            <span class="w-2.5 h-2.5 rounded-[2px] bg-[#ffffff] border border-slate-300"></span> 発表なし
+                        </div>
+                    </div>
+                    
+                    <!-- ヒント -->
+                    <div id="mapHint" class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-full border border-slate-200 shadow-sm pointer-events-none">
+                        <p class="text-[8px] font-bold text-slate-600 flex items-center gap-1">
+                            <i data-lucide="info" class="w-2.5 h-2.5 text-blue-600"></i> 都道府県を選択して詳細を表示
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 一括マトリックス表示ページ -->
+                <div id="matrixView" class="absolute inset-0 overflow-hidden p-1.5 md:p-3 translate-x-full opacity-0 pointer-events-none transition-all duration-300 bg-slate-50 flex flex-col gap-1.5">
+                    <div class="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+                        <div>
+                            <h2 class="text-xs md:text-sm font-black text-slate-800 tracking-tight flex items-center gap-1">
+                                <i class="w-3.5 h-3.5 text-red-600" data-lucide="grid"></i> 全都道府県リスク一括表示
+                            </h2>
+                            <p class="text-[8px] md:text-[9px] text-slate-500 font-bold mt-0.5">空欄（警報発表なし）の時間帯は自動で「〜〜〜」にギュッと凝縮されます。リスクのある重要な日程に自動幅調整されます。</p>
+                        </div>
+                    </div>
+
+                    <!-- メインマトリックスコンテナ (横スクロールを完全に禁止し、セルの縦方向の自然な拡張を許容) -->
+                    <div class="flex-1 overflow-y-auto overflow-x-hidden rounded-xl border border-slate-200 bg-white shadow-md custom-scrollbar relative">
+                        <table class="matrix-table text-[8px] md:text-[10px]">
+                            <thead id="matrixHeader" class="matrix-sticky-header">
+                                <!-- JSで動的生成 -->
+                            </thead>
+                            <tbody id="matrixBody">
+                                <!-- JSで動的生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 地域一覧表示ページ -->
+                <div id="listView" class="absolute inset-0 overflow-y-auto p-3 md:p-5 custom-scrollbar translate-x-full opacity-0 pointer-events-none transition-all duration-300 bg-[#f8fafc]">
+                    <div class="max-w-6xl mx-auto">
+                        <div class="flex items-end justify-between gap-4 mb-3">
+                            <div>
+                                <h2 class="text-lg sm:text-xl font-black text-slate-900 tracking-tighter italic">地域を選択してください</h2>
+                                <p class="text-[9px] text-slate-500 font-bold">全国の警報級リスク（XMLフィード解析）</p>
+                            </div>
+                        </div>
+                        <div id="prefGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 pb-20"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右ペイン（詳細表示サイドパネル） -->
+            <div id="rightPane" class="absolute inset-y-0 right-0 w-full md:w-[450px] lg:w-[550px] bg-white border-l border-slate-200 shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-[2000] flex flex-col shrink-0">
+                <div class="p-2.5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white shadow-sm z-10">
+                    <div class="flex-1 min-w-0 pr-4">
+                        <span class="text-[8px] bg-slate-100 border border-slate-200 text-slate-500 font-black px-1 py-0.5 rounded uppercase tracking-wider">Analysis Result</span>
+                        <h2 id="detailTitle" class="text-base sm:text-xl font-black text-slate-900 tracking-tighter italic mt-0.5 truncate"></h2>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button onclick="closeDetail()" class="p-1 hover:bg-slate-100 rounded-full transition-colors text-slate-500 border border-transparent hover:border-slate-200" title="閉じる">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="detailContent" class="flex-1 overflow-y-auto p-2.5 md:p-4 custom-scrollbar bg-slate-50 pb-20">
+                    <!-- ここに詳細情報（マトリックス表）が注入される -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const FEEDS = [
+            "https://www.data.jma.go.jp/developer/xml/feed/extra.xml",
+            "https://www.data.jma.go.jp/developer/xml/feed/regular.xml"
+        ];
+
+        const TYPE_NAME_MAP = {
+            "雨の警報級の可能性": "大雨",
+            "大雨の警報級の可能性": "大雨",
+            "雪の警報級の可能性": "大雪",
+            "風（風雪）の警報級の可能性": "暴風",
+            "波の警報級の可能性": "波浪",
+            "潮位の警報級の可能性": "高潮",
+            "土砂災害の警報級の可能性": "土砂災害"
+        };
+
+        const SORT_ORDER_SUMMARY = ["２４時間最大雨量", "２４時間最大降雪量", "最大風速", "波", "波高"];
+        const SORT_ORDER_RANK = ["大雨", "大雪", "暴風", "波浪", "高潮", "土砂災害"];
+        const SORT_ORDER_DETAIL = ["１時間最大雨量", "３時間最大雨量", "２４時間最大雨量", "６時間最大降雪量", "２４時間最大降雪量", "最大風速", "最大風速（陸上）", "最大風速（海上）", "波高", "波"];
+
+        function getSortIndex(key, orderArray) {
+            for (let i = 0; i < orderArray.length; i++) {
+                if (key.startsWith(orderArray[i])) return i;
+            }
+            return 999; 
+        }
+
+        // スマホでの2回タップ（ダブルタップ）でもアンロックが作動するための検出ロジック
+        let lastListClickTime = 0;
+        window.handleListClick = function() {
+            // 通常の「地域一覧」画面切り替え
+            switchView('list');
+
+            const currentTime = new Date().getTime();
+            const timeDiff = currentTime - lastListClickTime;
+            
+            // 350ミリ秒以内に再度押されたらダブルタップとみなしてアンロック
+            if (timeDiff < 350 && timeDiff > 0) {
+                unlockMatrixView();
+            }
+            lastListClickTime = currentTime;
+        };
+
+        // 一括表示ボタンをアンロックして表示する機能
+        window.unlockMatrixView = function() {
+            const btnMatrix = document.getElementById('btnMatrix');
+            if (btnMatrix && btnMatrix.classList.contains('hidden')) {
+                btnMatrix.classList.remove('hidden'); // ボタンを表示
+                switchView('matrix'); // そのまま一括表示に切り替え
+                
+                // 開発者・配信向けであることがわかる通知トーストを画面下部に表示
+                showDeveloperToast();
+            }
+        };
+
+        // 開発者向けアンロック通知トースト
+        function showDeveloperToast() {
+            // 既存のトーストをクリア
+            const existing = document.getElementById('devToast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.id = 'devToast';
+            toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900 text-white text-xs font-bold px-4 py-3 rounded-full shadow-2xl flex items-center gap-2 border border-slate-700 animate-bounce';
+            toast.innerHTML = `<i data-lucide="terminal" class="w-4 h-4 text-emerald-400"></i> 開発者配信用「一括表示」モードを有効化しました`;
+            document.body.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.style.transition = 'opacity 0.6s ease';
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 600);
+            }, 3000);
+        }
+
+        function getElementsByLocalName(element, localName) {
+            if (!element) return [];
+            return Array.from(element.getElementsByTagName('*')).filter(el => el.localName === localName);
+        }
+
+        const PREF_MAP = {"01":"北海道","02":"青森県","03":"岩手県","04":"宮城県","05":"秋田県","06":"山形県","07":"福島県","08":"茨城県","09":"栃木県","10":"群馬県","11":"埼玉県","12":"千葉県","13":"東京都","14":"神奈川県","15":"新潟県","16":"富山県","17":"石川県","18":"福井県","19":"山梨県","20":"長野県","21":"岐阜県","22":"静岡県","23":"愛知県","24":"三重県","25":"滋賀県","26":"京都府","27":"大阪府","28":"兵庫県","29":"奈良県","30":"和歌山県","31":"鳥取県","32":"島根県","33":"岡山県","34":"広島県","35":"山口県","36":"徳島県","37":"香川県","38":"愛媛県","39":"高知県","40":"福岡県","41":"佐賀県","42":"長崎県","43":"熊本県","44":"大分県","45":"宮崎県","46":"鹿児島県","47":"沖縄県"};
+        const PREF_GEOJSON_URL = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
+
+        const REGION_GROUPS = [
+            { label: "北海道", color: "border-blue-200 bg-blue-50/50 hover:bg-blue-100", regions: [{ id: "hokkaido", name: "北海道", keywords: ["北海道", "札幌", "函館", "旭川", "室蘭", "釧路", "帯広", "網走", "稚内", "石狩", "渡島", "十勝", "胆振", "上川", "宗谷", "後志", "檜山", "根室", "日高", "空知", "留萌", "北見", "紋別"] }] },
+            { label: "東北", color: "border-sky-200 bg-sky-50/50 hover:bg-sky-100", regions: [{ id: "aomori", name: "青森県", keywords: ["青森"] }, { id: "iwate", name: "岩手県", keywords: ["岩手", "盛岡"] }, { id: "miyagi", name: "宮城県", keywords: ["宮城", "仙台"] }, { id: "akita", name: "秋田県", keywords: ["秋田"] }, { id: "yamagata", name: "山形県", keywords: ["山形"] }, { id: "fukushima", name: "福島県", keywords: ["福島"] }]},
+            { label: "関東・甲信", color: "border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100", regions: [{ id: "ibaraki", name: "茨城県", keywords: ["茨城", "水戸"] }, { id: "tochigi", name: "栃木県", keywords: ["栃木", "宇都宮"] }, { id: "gunma", name: "群馬県", keywords: ["群馬", "前橋"] }, { id: "saitama", name: "埼玉県", keywords: ["埼玉", "熊谷"] }, { id: "chiba", name: "千葉県", keywords: ["千葉", "銚子"] }, { id: "tokyo", name: "東京都", keywords: ["東京", "気象庁", "小笠原", "伊豆", "大島", "八丈島", "三宅島", "父島"] }, { id: "kanagawa", name: "神奈川県", keywords: ["神奈川", "横浜"] }, { id: "yamanashi", name: "山梨県", keywords: ["山梨", "甲府"] }, { id: "nagano", name: "長野県", keywords: ["長野"] }]},
+            { label: "北陸・東海", color: "border-teal-200 bg-teal-50/50 hover:bg-teal-100", regions: [{ id: "niigata", name: "新潟県", keywords: ["新潟", "佐渡"] }, { id: "toyama", name: "富山県", keywords: ["富山"] }, { id: "ishikawa", name: "石川県", keywords: ["石川", "金沢"] }, { id: "fukui", name: "福井県", keywords: ["福井"] }, { id: "gifu", name: "岐阜県", keywords: ["岐阜"] }, { id: "shizuoka", name: "静岡県", keywords: ["静岡"] }, { id: "aichi", name: "愛知県", keywords: ["愛知", "名古屋"] }]},
+            { label: "近畿", color: "border-purple-200 bg-purple-50/50 hover:bg-purple-100", regions: [{ id: "mie", name: "三重県", keywords: ["三重", "津"] }, { id: "shiga", name: "滋賀県", keywords: ["滋賀", "大津", "彦根"] }, { id: "kyoto", name: "京都府", keywords: ["京都"] }, { id: "osaka", name: "大阪府", keywords: ["大阪"] }, { id: "hyogo", name: "兵庫県", keywords: ["兵庫", "神戸"] }, { id: "nara", name: "奈良県", keywords: ["奈良"] }, { id: "wakayama", name: "和歌山県", keywords: ["和歌山"] }]},
+            { label: "中国・四国", color: "border-amber-200 bg-amber-50/50 hover:bg-amber-100", regions: [{ id: "tottori", name: "鳥取県", keywords: ["鳥取"] }, { id: "shimane", name: "島根県", keywords: ["島根", "松江", "隠岐"] }, { id: "okayama", name: "岡山県", keywords: ["岡山"] }, { id: "hiroshima", name: "広島県", keywords: ["広島"] }, { id: "yamaguchi", name: "山口県", keywords: ["山口", "下関"] }, { id: "tokushima", name: "徳島県", keywords: ["徳島"] }, { id: "kagawa", name: "香川県", keywords: ["香川", "高松"] }, { id: "ehime", name: "愛媛県", keywords: ["愛媛", "松山"] }, { id: "kochi", name: "高知県", keywords: ["高知"] }]},
+            { label: "九州・沖縄", color: "border-orange-200 bg-orange-50/50 hover:bg-orange-100", regions: [{ id: "fukuoka", name: "福岡県", keywords: ["福岡"] }, { id: "saga", name: "佐賀県", keywords: ["佐賀"] }, { id: "nagasaki", name: "長崎県", keywords: ["長崎", "壱岐", "対馬", "五島"] }, { id: "kumamoto", name: "熊本県", keywords: ["熊本"] }, { id: "oita", name: "大分県", keywords: ["大分"] }, { id: "miyazaki", name: "宮崎県", keywords: ["宮崎"] }, { id: "kagoshima", name: "鹿児島県", keywords: ["鹿児島", "奄美", "名瀬", "種子島", "屋久島", "薩摩", "大隅", "十島"] }, { id: "okinawa", name: "沖縄県", keywords: ["沖縄", "那覇", "宮古島", "石垣", "石垣島", "南大東", "南大東島", "八重山", "大東島", "先島"] }]}
+        ];
+
+        var map = null;
+        var japanGeoData = null;
+        var mainPrefLayer = null;
+        var selectedPrefId = null;
+
+        var allFeedData = []; 
+        var globalRisks = {};
+        var xmlDocs = {}; 
+
+        // 全都道府県の一括監視用の全データ・キャッシュ
+        var prefFullDataCache = {};
+
+        async function fetchJsonSafely(url) {
+            try {
+                const response = await fetch(url);
+                return response.ok ? await response.json() : null;
+            } catch (e) { return null; }
+        }
+
+        async function init() {
+            lucide.createIcons();
+            const overlay = document.getElementById('fullScreenLoading');
+            const msg = document.getElementById('loadingMessage');
+            
+            overlay.style.display = 'flex';
+            overlay.style.opacity = '1';
+            msg.innerText = "XMLフィードから全ての電文を取得中...";
+
+            try {
+                if (!japanGeoData) japanGeoData = await fetchJsonSafely(PREF_GEOJSON_URL);
+
+                allFeedData = [];
+                globalRisks = {};
+                xmlDocs = {};
+                prefFullDataCache = {};
+
+                for (const url of FEEDS) {
+                    const res = await fetch(url);
+                    const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
+                    Array.from(xml.getElementsByTagName('entry')).forEach(entry => {
+                        const link = getElementsByLocalName(entry, 'link')[0]?.getAttribute('href');
+                        const title = getElementsByLocalName(entry, 'title')[0]?.textContent || "";
+                        if (link) {
+                            allFeedData.push({
+                                title, 
+                                updated: new Date(getElementsByLocalName(entry, 'updated')[0]?.textContent),
+                                author: getElementsByLocalName(getElementsByLocalName(entry, 'author')[0], 'name')[0]?.textContent,
+                                link
+                            });
+                        }
+                    });
+                }
+                
+                const seen = new Set();
+                allFeedData = allFeedData.filter(item => {
+                    const key = item.title + item.author;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+
+                msg.innerText = "各エリアのXMLデータを解析中...";
+
+                const scanPromises = allFeedData.map(async item => {
+                    try {
+                        const res = await fetch(item.link);
+                        const xmlText = await res.text();
+                        xmlDocs[item.link] = xmlText; 
+                        
+                        const xml = new DOMParser().parseFromString(xmlText, "text/xml");
+                        const risksFound = [];
+                        
+                        // XML内の時系列情報(時間定義)および各警報リスク情報をパースして保持
+                        const timeSeriesList = getElementsByLocalName(xml, 'TimeSeriesInfo');
+                        const timeDefines = getElementsByLocalName(xml, 'TimeDefine');
+                        const timeDefinesMap = {};
+                        timeDefines.forEach(td => {
+                            const id = td.getAttribute('timeId');
+                            let name = getElementsByLocalName(td, 'Name')[0]?.textContent;
+                            const dtStr = getElementsByLocalName(td, 'DateTime')[0]?.textContent;
+                            let timestamp = 0;
+                            if (dtStr) {
+                                timestamp = new Date(dtStr).getTime();
+                            }
+                            if (!name) {
+                                // 週間早期注意情報などNameがない場合、DateTimeから日付名を作る
+                                if(dtStr) {
+                                    const d = new Date(dtStr);
+                                    name = `${d.getMonth() + 1}/${d.getDate()}(${['日','月','火','水','木','金','土'][d.getDay()]})`;
+                                } else {
+                                    name = "日時不明";
+                                }
+                            }
+                            timeDefinesMap[id] = { name, timestamp };
+                        });
+
+                        const kinds = getElementsByLocalName(xml, 'Kind');
+                        kinds.forEach(kind => {
+                            const prop = getElementsByLocalName(kind, 'Property')[0];
+                            const rawType = prop ? getElementsByLocalName(prop, 'Type')[0]?.textContent : null;
+                            const typeName = TYPE_NAME_MAP[rawType] || rawType;
+                            if (!typeName) return;
+
+                            const rankNodes = getElementsByLocalName(kind, 'PossibilityRankOfWarning');
+                            rankNodes.forEach(rank => {
+                                let condAttr = rank.getAttribute('condition');
+                                let textCond = rank.textContent.trim();
+                                let val = (condAttr && condAttr !== '値なし') ? condAttr : textCond;
+                                const refID = rank.getAttribute('refID');
+                                
+                                let rVal = 'なし';
+                                if (val === '高い' || val === '高' || val === '[高]') {
+                                    rVal = '高';
+                                    risksFound.push({ type: typeName, rank: '高' });
+                                } else if (val === '中程度' || val === '中' || val === '[中]') {
+                                    rVal = '中';
+                                    risksFound.push({ type: typeName, rank: '中' });
+                                }
+
+                                // キャッシュへ保持する構造を格納
+                                // 該当Itemが属するArea情報をたどる
+                                let parent = rank.parentNode;
+                                while(parent && parent.localName !== 'Item') parent = parent.parentNode;
+                                if (parent) {
+                                    const areaNode = getElementsByLocalName(parent, 'Area')[0];
+                                    const areaName = areaNode ? getElementsByLocalName(areaNode, 'Name')[0]?.textContent || "" : "";
+                                    
+                                    // 都道府県をマッチング
+                                    Object.keys(PREF_MAP).forEach(prefId => {
+                                        const prefName = PREF_MAP[prefId];
+                                        let targetRegion = null;
+                                        for (const group of REGION_GROUPS) {
+                                            const r = group.regions.find(reg => reg.name === prefName);
+                                            if (r) { targetRegion = r; break; }
+                                        }
+
+                                        if (targetRegion && targetRegion.keywords.some(k => item.author && item.author.includes(k) || item.title && item.title.includes(k))) {
+                                            if (!prefFullDataCache[prefId]) prefFullDataCache[prefId] = { riskByKind: {}, riskByTime: {} };
+                                            
+                                            // 種類別の最高リスク
+                                            if (!prefFullDataCache[prefId].riskByKind[typeName]) prefFullDataCache[prefId].riskByKind[typeName] = 'なし';
+                                            if (rVal === '高') prefFullDataCache[prefId].riskByKind[typeName] = '高';
+                                            else if (rVal === '中' && prefFullDataCache[prefId].riskByKind[typeName] !== '高') prefFullDataCache[prefId].riskByKind[typeName] = '中';
+
+                                            // 時間帯別の最高リスク (DateTimeから自動生成された日付フォーマットでも登録される)
+                                            const timeInfo = timeDefinesMap[refID];
+                                            if (timeInfo) {
+                                                const timeName = timeInfo.name;
+                                                const timestamp = timeInfo.timestamp;
+                                                const timeKey = `${timeName}_${typeName}`;
+                                                if (!prefFullDataCache[prefId].riskByTime[timeKey]) {
+                                                    prefFullDataCache[prefId].riskByTime[timeKey] = { rank: 'なし', timestamp };
+                                                }
+                                                if (rVal === '高') {
+                                                    prefFullDataCache[prefId].riskByTime[timeKey].rank = '高';
+                                                } else if (rVal === '中' && prefFullDataCache[prefId].riskByTime[timeKey].rank !== '高') {
+                                                    prefFullDataCache[prefId].riskByTime[timeKey].rank = '中';
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                        globalRisks[item.link] = risksFound;
+                    } catch (e) {}
+                });
+                await Promise.all(scanPromises);
+
+                const lastUpdateEl = document.getElementById('lastUpdate');
+                if (lastUpdateEl) lastUpdateEl.innerText = new Date().toLocaleTimeString('ja-JP') + " 更新";
+
+                initMap();
+                renderListView();
+                renderMatrixTable();
+                switchView('map');
+
+                overlay.style.opacity = '0';
+                setTimeout(() => overlay.style.display = 'none', 500);
+
+            } catch (e) {
+                msg.innerHTML = `<span class="text-red-500 font-bold">システムエラー: ${e.message}</span>`;
+            }
+        }
+
+        // --- 全国一括タイムラインマトリックスビュー描画機能（空欄自動省略・幅自動調整搭載） ---
+        window.renderMatrixTable = function() {
+            const header = document.getElementById('matrixHeader');
+            const body = document.getElementById('matrixBody');
+            
+            if (!header || !body) return;
+
+            // 1. 全都道府県のキャッシュから時間帯名とタイムスタンプを紐づけて収集
+            const timeMap = {}; // { timeName: timestamp }
+            Object.keys(prefFullDataCache).forEach(prefId => {
+                const cache = prefFullDataCache[prefId];
+                if (cache && cache.riskByTime) {
+                    Object.keys(cache.riskByTime).forEach(key => {
+                        const parts = key.split('_'); // [timeName, typeName]
+                        const timeName = parts[0];
+                        const data = cache.riskByTime[key];
+                        if (timeName && data && data.timestamp) {
+                            if (!timeMap[timeName] || timeMap[timeName] === 0) {
+                                timeMap[timeName] = data.timestamp;
+                            }
+                        }
+                    });
+                }
+            });
+
+            // タイムスタンプ順（昇順）で完全にソート
+            const sortedTimeNames = Object.keys(timeMap).sort((a, b) => {
+                const diff = (timeMap[a] || 0) - (timeMap[b] || 0);
+                if (diff !== 0) return diff;
+                return a.localeCompare(b, 'ja');
+            });
+
+            // 時間帯が1つも無い場合の処理
+            if (sortedTimeNames.length === 0) {
+                header.innerHTML = `
+                    <tr>
+                        <th class="matrix-sticky-corner p-2 text-slate-700 text-left">警報種別</th>
+                        <th class="p-2 text-slate-400 font-bold text-center">時系列データ予測情報なし</th>
+                    </tr>
+                `;
+                body.innerHTML = `
+                    <tr>
+                        <td class="matrix-sticky-col p-2 text-left text-slate-500 font-black">全種別</td>
+                        <td class="p-6 text-slate-400 font-bold bg-slate-50">
+                            現在、全国で警報級リスク（高・中）の時系列予測データはありません。
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // 2. 各時間帯が「リスクあり（全国のいずれかの県で高または中）」か「完全な空欄」かを解析
+            const timeMapRiskStatus = {};
+            sortedTimeNames.forEach(t => {
+                let hasRisk = false;
+                SORT_ORDER_RANK.forEach(kind => {
+                    Object.keys(PREF_MAP).forEach(prefId => {
+                        const cache = prefFullDataCache[prefId];
+                        if (cache && cache.riskByTime) {
+                            const key = `${t}_${kind}`;
+                            const valObj = cache.riskByTime[key];
+                            const val = valObj ? valObj.rank : 'なし';
+                            if (val === '高' || val === '中') {
+                                hasRisk = true;
+                            }
+                        }
+                    });
+                });
+                timeMapRiskStatus[t] = hasRisk;
+            });
+
+            // 3. 表示カラムの構成を作る (空欄の時間帯が連続する場合は「〜〜〜」に圧縮・省略してまとめる)
+            const displayColumns = [];
+            let pendingOmitted = [];
+
+            sortedTimeNames.forEach(t => {
+                const hasRisk = timeMapRiskStatus[t];
+                if (hasRisk) {
+                    if (pendingOmitted.length > 0) {
+                        displayColumns.push({
+                            type: 'omitted',
+                            label: '〜〜〜',
+                            tooltip: pendingOmitted.join(' / ') + ' は警報級の可能性なし',
+                            times: [...pendingOmitted]
+                        });
+                        pendingOmitted = [];
+                    }
+                    displayColumns.push({
+                        type: 'active',
+                        label: t,
+                        time: t
+                    });
+                } else {
+                    pendingOmitted.push(t);
+                }
+            });
+
+            if (pendingOmitted.length > 0) {
+                displayColumns.push({
+                    type: 'omitted',
+                    label: '〜〜〜',
+                    tooltip: pendingOmitted.join(' / ') + ' は警報級の可能性なし',
+                    times: [...pendingOmitted]
+                });
+            }
+
+            // 【ヘッダー生成】(横スクロールを徹底排除しつつ、省略カラムは極小に自動割り振り、アクティブカラムは十分な可変幅に自動調整)
+            header.innerHTML = `
+                <tr>
+                    <th class="matrix-sticky-corner p-1.5 w-[55px] md:w-[80px] font-black text-slate-800 text-left bg-slate-100 border-b border-r border-slate-200 text-[8px] md:text-[10px] whitespace-nowrap">
+                        警報種別
+                    </th>
+                    ${displayColumns.map(col => {
+                        if (col.type === 'active') {
+                            // アクティブ列：極小表示を徹底
+                            let compactTime = col.label
+                                .replace(/から/g, '〜')
+                                .replace(/明け方/g, '明け')
+                                .replace(/朝から夕方/g, '朝-夕')
+                                .replace(/夕方から夜のはじめ頃/g, '夕-夜')
+                                .replace(/夜のはじめ頃から夜遅く/g, '夜')
+                                .replace(/午前中/g, '午前')
+                                .replace(/午後/g, '午後');
+                            return `
+                                <th class="p-1.5 font-black text-slate-700 bg-slate-50 leading-tight border-b border-r border-slate-200 text-[8px] md:text-[9px] break-words">
+                                    ${compactTime}
+                                </th>
+                            `;
+                        } else {
+                            // 省略列：非常に細い（w-[22px]〜w-[30px]）固定幅を定義し、平穏であることを示す
+                            return `
+                                <th class="p-1 w-[22px] md:w-[30px] font-extrabold text-slate-400 bg-slate-100 border-b border-r border-slate-200 text-[8px] md:text-[9px] text-center whitespace-nowrap" title="${col.tooltip}">
+                                    ${col.label}
+                                </th>
+                            `;
+                        }
+                    }).join('')}
+                </tr>
+            `;
+
+            // 【ボディ生成】(縦軸に警報種別、交点に都道府県リスト)
+            let bodyHtml = "";
+            SORT_ORDER_RANK.forEach(kind => {
+                bodyHtml += `
+                    <tr class="hover:bg-slate-50/50 transition-colors">
+                        <!-- 縦軸ラベル: 警報種別 (幅をスマートに制限) -->
+                        <td class="matrix-sticky-col p-1.5 text-left text-[9px] md:text-xs text-slate-800 font-black bg-white shadow-[1px_0_0_#e2e8f0] border-b border-slate-200 w-[55px] md:w-[80px] whitespace-nowrap">
+                            ${kind}
+                        </td>
+                        <!-- 横軸: カラムタイプに応じてアクティブバッジ、または省略ブロックを描画 -->
+                        ${displayColumns.map(col => {
+                            if (col.type === 'active') {
+                                const t = col.time;
+                                const highPrefs = [];
+                                const midPrefs = [];
+
+                                // 全都道府県をチェック
+                                Object.keys(PREF_MAP).forEach(prefId => {
+                                    const prefName = PREF_MAP[prefId];
+                                    const cache = prefFullDataCache[prefId];
+                                    if (cache && cache.riskByTime) {
+                                        const key = `${t}_${kind}`;
+                                        const valObj = cache.riskByTime[key];
+                                        const val = valObj ? valObj.rank : 'なし';
+                                        const shortName = prefName.replace(/[都府県]$/, ''); // 短縮名にしてカードを極小化
+                                        
+                                        if (val === '高') {
+                                            highPrefs.push({ id: prefId, name: shortName });
+                                        } else if (val === '中') {
+                                            midPrefs.push({ id: prefId, name: shortName });
+                                        }
+                                    }
+                                });
+
+                                let cellHtml = "";
+                                if (highPrefs.length === 0 && midPrefs.length === 0) {
+                                    cellHtml = `<span class="text-slate-300 font-bold text-[8px]">―</span>`;
+                                } else {
+                                    // バッジが入り切らない場合は自動で下に改行
+                                    cellHtml = `<div class="matrix-cell-container">`;
+                                    
+                                    // 高リスク（赤色極小バッジ）
+                                    highPrefs.forEach(p => {
+                                        cellHtml += `
+                                            <button onclick="showPrefDetail('${p.id}')" class="bg-red-600 hover:bg-red-700 text-white text-[8px] md:text-[9px] font-black px-1.5 py-0.5 rounded shadow-[0_1px_1px_rgba(220,38,38,0.15)] transition-all shrink-0">
+                                                ${p.name}
+                                            </button>
+                                        `;
+                                    });
+
+                                    // 中リスク（ピンク色極小バッジ）
+                                    midPrefs.forEach(p => {
+                                        cellHtml += `
+                                            <button onclick="showPrefDetail('${p.id}')" class="bg-red-100 hover:bg-red-200 text-red-900 text-[8px] md:text-[9px] font-black px-1.5 py-0.5 rounded border border-red-200 transition-all shrink-0">
+                                                ${p.name}
+                                            </button>
+                                        `;
+                                    });
+
+                                    cellHtml += `</div>`;
+                                }
+                                
+                                // 背景色のニュアンス付け
+                                let bgClass = "bg-white";
+                                if (highPrefs.length > 0) bgClass = "bg-red-50/10";
+                                else if (midPrefs.length > 0) bgClass = "bg-amber-50/5";
+
+                                return `
+                                    <td class="p-1 text-center border-b border-r border-slate-200 ${bgClass}">
+                                        ${cellHtml}
+                                    </td>
+                                `;
+                            } else {
+                                // 省略された列（全国ですべて「発表なし」の時間帯）
+                                return `
+                                    <td class="p-1 text-center border-b border-r border-slate-200 bg-slate-50/50 text-slate-300 font-bold text-[8px] w-[22px] md:w-[30px] whitespace-nowrap">
+                                        ―
+                                    </td>
+                                `;
+                            }
+                        }).join('')}
+                    </tr>
+                `;
+            });
+            body.innerHTML = bodyHtml;
+        };
+
+        function getAggregatedRisksForRegion(region) {
+            const allRisks = [];
+            allFeedData.forEach(item => {
+                if (region.keywords.some(k => item.author && item.author.includes(k) || item.title && item.title.includes(k))) {
+                    if (globalRisks[item.link]) allRisks.push(...globalRisks[item.link]);
+                }
+            });
+            return allRisks;
+        }
+
+        function getPrefRiskScore(prefName) {
+            if (!prefName) return 0;
+            let targetRegion = null;
+            for (const group of REGION_GROUPS) {
+                const region = group.regions.find(r => r.name === prefName);
+                if (region) { targetRegion = region; break; }
+            }
+            if (!targetRegion) return 0;
+            
+            const risks = getAggregatedRisksForRegion(targetRegion);
+            let maxScore = 0;
+            for (const r of risks) {
+                if (r.rank === '高') maxScore = 2;
+                else if (r.rank === '中' && maxScore < 2) maxScore = 1;
+            }
+            return maxScore;
+        }
+
+        function getRiskSummary() {
+            const summary = [];
+            Object.keys(PREF_MAP).forEach(id => {
+                const prefName = PREF_MAP[id];
+                let targetRegion = null;
+                for (const group of REGION_GROUPS) {
+                    const region = group.regions.find(r => r.name === prefName);
+                    if (region) { targetRegion = region; break; }
+                }
+                
+                if (targetRegion) {
+                    const risks = getAggregatedRisksForRegion(targetRegion);
+                    const riskMap = {};
+                    risks.forEach(r => {
+                        if (!riskMap[r.type]) {
+                            riskMap[r.type] = r.rank;
+                        } else {
+                            if (r.rank === '高') riskMap[r.type] = '高';
+                        }
+                    });
+                    
+                    const riskKeys = Object.keys(riskMap);
+                    if (riskKeys.length > 0) {
+                        summary.push({
+                            id,
+                            name: prefName,
+                            risks: riskKeys.map(k => ({ type: k, rank: riskMap[k] }))
+                        });
+                    }
+                }
+            });
+            
+            summary.sort((a, b) => {
+                const maxScoreA = a.risks.some(r => r.rank === '高') ? 2 : 1;
+                const maxScoreB = b.risks.some(r => r.rank === '高') ? 2 : 1;
+                if (maxScoreA !== maxScoreB) return maxScoreB - maxScoreA;
+                return a.id.localeCompare(b.id);
+            });
+            
+            return summary;
+        }
+
+        function getLevelColor(score) {
+            if (score === 2) return "#dc2626"; 
+            if (score === 1) return "#fca5a5"; 
+            return "#ffffff"; 
+        }
+
+        function initMap() {
+            if (!map) {
+                map = L.map('map', { zoomSnap: 0.1, attributionControl: false }).setView([38, 137], window.innerWidth < 640 ? 4.5 : 5.2);
+            }
+            renderMapLayers();
+        }
+
+        function renderMapLayers() {
+            if (!map || !japanGeoData) return;
+            if (mainPrefLayer) map.removeLayer(mainPrefLayer);
+
+            mainPrefLayer = L.geoJson(japanGeoData, {
+                smoothFactor: 0,
+                style: (f) => {
+                    const id = f.properties.id ? String(f.properties.id).padStart(2, "0") : (f.properties.pref ? String(f.properties.pref).padStart(2, "0") : "");
+                    const prefName = PREF_MAP[id];
+                    const score = getPrefRiskScore(prefName);
+                    const isSelected = selectedPrefId === id;
+                    
+                    return {
+                        fillColor: getLevelColor(score),
+                        fillOpacity: 1, 
+                        weight: isSelected ? 3 : 1,
+                        color: isSelected ? "#1d4ed8" : "#cbd5e1",
+                        opacity: 1,
+                        fill: true
+                    };
+                },
+                onEachFeature: (f, layer) => {
+                    const id = f.properties.id ? String(f.properties.id).padStart(2, "0") : (f.properties.pref ? String(f.properties.pref).padStart(2, "0") : "");
+                    const prefName = PREF_MAP[id];
+
+                    layer.bindTooltip(`<b>${prefName || "不明"}</b>`, {
+                        sticky: true, direction: "auto", className: "font-sans text-xs bg-white/95 px-2 py-1 border border-slate-200 rounded shadow-sm"
+                    });
+
+                    layer.on('click', () => {
+                        if(id) {
+                            selectedPrefId = id;
+                            renderMapLayers();
+                            if (layer.getBounds && layer.getBounds().isValid()) {
+                                map.fitBounds(layer.getBounds(), { padding: [50, 50] });
+                            }
+                            showPrefDetail(id);
+                        }
+                    });
+                }
+            }).addTo(map);
+        }
+
+        function highlightNumbers(text) {
+            return text.replace(/([０-９0-9]+(?:．[０-９0-9]+|\.[0-9]+)?)/g, '<span class="number-highlight">$1</span>');
+        }
+
+        function formatDetailText(text) {
+            if (!text) return "";
+            let s = text;
+            s = s.replace(/陸上([０-９0-9．.]+)メートル(?:以下)?[　\s]*海上(?:では)?([０-９0-9．.]+)メートル(?:以下)?/g, (match, p1, p2) => {
+                if (p1 === p2) return `陸・海 ${p1}m以下`;
+                return `陸 ${p1}m以下 / 海 ${p2}m以下`;
+            });
+            s = s.replace(/メートル/g, 'm');
+            s = s.replace(/センチ/g, 'cm');
+            s = s.replace(/ミリ/g, 'mm');
+            s = s.replace(/キロメートル/g, 'km');
+            s = s.replace(/海上では/g, '海 ');
+            s = s.replace(/陸上/g, '陸 ');
+            s = s.replace(/　/g, ' ');
+            return highlightNumbers(s);
+        }
+
+        function getDirectTextContent(node) {
+            let text = "";
+            if (!node) return text;
+            node.childNodes.forEach(n => {
+                if (n.nodeType === 3) text += n.nodeValue; 
+            });
+            return text.trim();
+        }
+
+        function generateAnalysisHtml(doc, titleText) {
+            const isWarningRisk = titleText.includes("警報級の可能性") || titleText.includes("早期注意情報");
+
+            if (!isWarningRisk) {
+                let headlineText = "";
+                const headlineNodes = getElementsByLocalName(doc, 'Headline');
+                if (headlineNodes.length > 0) {
+                    const textNodes = getElementsByLocalName(headlineNodes[0], 'Text');
+                    if (textNodes.length > 0) headlineText = textNodes[0].textContent.trim();
+                }
+                
+                if (!headlineText) {
+                     const texts = getElementsByLocalName(doc, 'Text');
+                     let longestText = "";
+                     texts.forEach(t => {
+                         const txt = t.textContent.trim();
+                         if (txt.length > longestText.length) longestText = txt;
+                     });
+                     if (longestText.length > 10 && longestText.length < 1500) headlineText = longestText;
+                }
+
+                if (headlineText) {
+                    return `
+                    <div class="mb-6 p-5 sm:p-6 bg-white border border-slate-200 rounded-[1.5rem] shadow-sm">
+                        <h4 class="text-sm font-black tracking-tight mb-4 text-slate-800 pb-3 border-b border-slate-100 flex items-center gap-2">
+                            <i data-lucide="file-text" class="w-4 h-4 text-blue-500"></i> ${titleText}
+                        </h4>
+                        <div class="bg-slate-50 p-4 rounded-xl text-xs text-slate-700 leading-loose font-medium whitespace-pre-wrap max-h-[350px] overflow-y-auto custom-scrollbar border border-slate-200 shadow-inner">
+                            ${headlineText}
+                        </div>
+                    </div>`;
+                } else {
+                    return `
+                    <div class="mb-4 p-4 bg-white border border-slate-200 rounded-xl shadow-sm opacity-60">
+                        <h4 class="text-xs font-black tracking-tight text-slate-800 flex items-center gap-2">
+                            <i data-lucide="file-text" class="w-4 h-4 text-slate-400"></i> ${titleText}
+                        </h4>
+                        <p class="text-[10px] text-slate-500 mt-2 font-bold">※この電文は詳細表示に未対応です（RAWデータタブから確認できます）</p>
+                    </div>`;
+                }
+            }
+
+            let html = "";
+            
+            // --- 1. 日別最大予測 ---
+            const metInfos = getElementsByLocalName(doc, 'MeteorologicalInfo');
+            if (metInfos.length > 0) {
+                let hasValidMetInfo = false;
+                let metInfoHtml = `<div class="mb-6">
+                    <h4 class="text-xs font-black text-slate-500 mb-3 flex items-center gap-1.5 uppercase tracking-widest"><i data-lucide="calendar-check-2" class="w-4 h-4"></i> 日別最大予測</h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">`;
+                
+                metInfos.forEach(info => {
+                    const dateName = getElementsByLocalName(info, 'Name')[0]?.textContent || "";
+                    const items = getElementsByLocalName(info, 'Item');
+                    
+                    items.forEach(item => {
+                        const areaNode = getElementsByLocalName(item, 'Area')[0];
+                        const areaName = areaNode ? getElementsByLocalName(areaNode, 'Name')[0]?.textContent || "" : "";
+                        
+                        let itemHtml = `<div class="bg-blue-50/60 border border-blue-100 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-1 h-full bg-blue-400"></div>
+                            <div class="text-[10px] font-black text-blue-500 mb-2.5 tracking-wider">${dateName} - ${areaName}</div>
+                            <div class="space-y-2">`;
+                        
+                        let kindsData = [];
+                        const kinds = getElementsByLocalName(item, 'Kind');
+                        kinds.forEach(kind => {
+                            const prop = getElementsByLocalName(kind, 'Property')[0];
+                            const type = prop ? getElementsByLocalName(prop, 'Type')[0]?.textContent || "" : "";
+                            
+                            let val = "";
+                            const detailForecasts = getElementsByLocalName(kind, 'DetailForecast');
+                            if (detailForecasts.length > 0) {
+                                const firstPart = detailForecasts[0].children[0];
+                                if (firstPart) {
+                                    const baseNodes = Array.from(firstPart.children).filter(c => c.localName === 'Base');
+                                    if (baseNodes.length > 0) {
+                                        const valNodes = Array.from(baseNodes[0].children);
+                                        if (valNodes.length > 0) {
+                                            const condition = valNodes[0].getAttribute('condition');
+                                            const description = valNodes[0].getAttribute('description');
+                                            const unit = valNodes[0].getAttribute('unit');
+                                            const textVal = getDirectTextContent(valNodes[0]);
+                                            
+                                            if (description && description !== '値なし') val = description + (unit ? unit : "");
+                                            else if (textVal) val = textVal + (unit ? unit : "");
+                                            else if (condition && condition !== '値なし') val = condition;
+                                        }
+                                    }
+                                    if(!val) {
+                                         const sentenceNode = getElementsByLocalName(firstPart, 'Sentence')[0];
+                                         val = sentenceNode ? sentenceNode.textContent.trim() : "";
+                                    }
+                                }
+                            }
+                            
+                            if (type && val) kindsData.push({ type, val });
+                        });
+
+                        kindsData.sort((a, b) => getSortIndex(a.type, SORT_ORDER_SUMMARY) - getSortIndex(b.type, SORT_ORDER_SUMMARY));
+
+                        let hasData = kindsData.length > 0;
+                        kindsData.forEach(d => {
+                            itemHtml += `<div class="flex justify-between items-end text-xs border-b border-blue-200/50 pb-1.5">
+                                <span class="text-slate-600 font-bold">${d.type}</span>
+                                <span class="font-bold text-slate-800 text-right">${formatDetailText(d.val)}</span>
+                            </div>`;
+                        });
+                        
+                        if(hasData) {
+                            itemHtml += `</div></div>`;
+                            metInfoHtml += itemHtml;
+                            hasValidMetInfo = true;
+                        }
+                    });
+                });
+                metInfoHtml += `</div></div>`;
+                if(hasValidMetInfo) html += metInfoHtml;
+            }
+
+            // --- 2. タイムシリーズ解析 ---
+            const timeSeriesList = getElementsByLocalName(doc, 'TimeSeriesInfo');
+            
+            timeSeriesList.forEach((ts, tsIndex) => {
+                const timeDefinesMap = {};
+                const timeDefineIds = [];
+                const timeDefines = getElementsByLocalName(ts, 'TimeDefine');
+                
+                timeDefines.forEach(td => {
+                    const id = td.getAttribute('timeId');
+                    let name = getElementsByLocalName(td, 'Name')[0]?.textContent;
+                    if (!name) {
+                        const dtStr = getElementsByLocalName(td, 'DateTime')[0]?.textContent;
+                        if(dtStr) {
+                            const d = new Date(dtStr);
+                            name = `${d.getMonth() + 1}/${d.getDate()}(${['日','月','火','水','木','金','土'][d.getDay()]})`;
+                        } else name = "日時不明";
+                    }
+                    timeDefinesMap[id] = name;
+                    if (!timeDefineIds.includes(id)) timeDefineIds.push(id);
+                });
+
+                const areaData = {};
+                const items = getElementsByLocalName(ts, 'Item');
+                
+                items.forEach(infoItem => {
+                    const areaNode = getElementsByLocalName(infoItem, 'Area')[0];
+                    const targetArea = areaNode ? getElementsByLocalName(areaNode, 'Name')[0]?.textContent || "対象区域" : "対象区域";
+                    if (!areaData[targetArea]) areaData[targetArea] = { rankTypes: {}, detailTypes: {}, text: "" };
+                    
+                    const kinds = getElementsByLocalName(infoItem, 'Kind');
+                    kinds.forEach(kind => {
+                        const prop = getElementsByLocalName(kind, 'Property')[0];
+                        const rawType = prop ? getElementsByLocalName(prop, 'Type')[0]?.textContent : null;
+                        const typeName = TYPE_NAME_MAP[rawType] || rawType;
+                        if (!typeName) return;
+
+                        // ランク情報の抽出
+                        const rankNodes = getElementsByLocalName(kind, 'PossibilityRankOfWarning');
+                        if (rankNodes.length > 0) {
+                            if (!areaData[targetArea].rankTypes[typeName]) areaData[targetArea].rankTypes[typeName] = {};
+                            rankNodes.forEach(rank => {
+                                let condAttr = rank.getAttribute('condition');
+                                let textCond = rank.textContent.trim();
+                                let val = (condAttr && condAttr !== '値なし') ? condAttr : textCond;
+                                
+                                let finalVal = 'なし';
+                                if (val === '高い' || val === '高' || val === '[高]') finalVal = '高';
+                                else if (val === '中程度' || val === '中' || val === '[中]') finalVal = '中';
+                                else if (val && val !== '値なし') finalVal = val;
+                                
+                                areaData[targetArea].rankTypes[typeName][rank.getAttribute('refID')] = finalVal;
+                            });
+                        }
+
+                        // 詳細予測値の抽出 (Base要素およびSubArea要素対応の高度化)
+                        const detailForecasts = getElementsByLocalName(kind, 'DetailForecast');
+                        detailForecasts.forEach(df => {
+                            const parts = Array.from(df.children);
+                            parts.forEach(f => {
+                                const refID = f.getAttribute('refID');
+                                if (!refID) return;
+
+                                const processBase = (baseNode, prefixAreaName = "") => {
+                                    const locals = getElementsByLocalName(baseNode, 'Local');
+                                    if (locals.length > 0) {
+                                        locals.forEach(local => {
+                                            const areaNameNode = getElementsByLocalName(local, 'AreaName')[0];
+                                            const localAreaName = areaNameNode ? areaNameNode.textContent : "";
+                                            const valNodes = Array.from(local.children).filter(n => n.localName !== 'AreaName');
+                                            if (valNodes.length > 0) {
+                                                extractAndSet(valNodes[0], prefixAreaName + (localAreaName ? `（${localAreaName}）` : ""));
+                                            }
+                                        });
+                                    } else {
+                                        const valNodes = Array.from(baseNode.children);
+                                        if (valNodes.length > 0) {
+                                            extractAndSet(valNodes[0], prefixAreaName);
+                                        }
+                                    }
+                                };
+
+                                const extractAndSet = (valNode, suffix) => {
+                                    const condition = valNode.getAttribute('condition');
+                                    const description = valNode.getAttribute('description');
+                                    const unit = valNode.getAttribute('unit');
+                                    const textVal = getDirectTextContent(valNode);
+                                    
+                                    let val = "";
+                                    if (description && description !== '値なし') val = description + (unit ? unit : "");
+                                    else if (textVal) textVal + (unit ? unit : "");
+                                    else if (condition && condition !== '値なし') val = condition;
+
+                                    const detailTypeKey = rawType + suffix;
+                                    if (!areaData[targetArea].detailTypes[detailTypeKey]) areaData[targetArea].detailTypes[detailTypeKey] = {};
+                                    areaData[targetArea].detailTypes[detailTypeKey][refID] = val;
+                                };
+
+                                let hasBase = false;
+                                Array.from(f.children).forEach(child => {
+                                    if (child.localName === 'Base') {
+                                        processBase(child, "");
+                                        hasBase = true;
+                                    } else if (child.localName === 'SubArea') {
+                                        const subAreaNameNode = getElementsByLocalName(child, 'AreaName')[0];
+                                        const subAreaName = subAreaNameNode ? subAreaNameNode.textContent : "";
+                                        const subBases = getElementsByLocalName(child, 'Base');
+                                        subBases.forEach(subBase => {
+                                            processBase(subBase, subAreaName ? `（${subAreaName}）` : "");
+                                            hasBase = true;
+                                        });
+                                    }
+                                });
+
+                                if (!hasBase) {
+                                    const sentenceNode = getElementsByLocalName(f, 'Sentence')[0];
+                                    const val = sentenceNode ? sentenceNode.textContent.trim() : "";
+                                    if (!areaData[targetArea].detailTypes[rawType]) areaData[targetArea].detailTypes[rawType] = {};
+                                    areaData[targetArea].detailTypes[rawType][refID] = val;
+                                }
+                            });
+                        });
+                        
+                        // 補足テキストの抽出
+                        if (prop) {
+                            const textNode = getElementsByLocalName(prop, 'Text')[0];
+                            if (textNode) {
+                                const kindText = textNode.textContent;
+                                if (kindText && !areaData[targetArea].text.includes(kindText)) {
+                                    areaData[targetArea].text += (areaData[targetArea].text ? "\n" : "") + kindText;
+                                }
+                            }
+                        }
+                    });
+                });
+
+                // エリアごとにHTML生成
+                for (const [areaName, data] of Object.entries(areaData)) {
+                    
+                    let highestRank = 'なし';
+                    for (const type in data.rankTypes) {
+                        for (const tid in data.rankTypes[type]) {
+                            const rank = data.rankTypes[type][tid];
+                            if (rank === '高') highestRank = '高';
+                            else if (rank === '中' && highestRank !== '高') highestRank = '中';
+                        }
+                    }
+
+                    let badgeHtml = '';
+                    if (highestRank === '高') {
+                        badgeHtml = '<span class="ml-3 align-middle bg-red-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm inline-flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3"></i> 警報級(高)</span>';
+                    } else if (highestRank === '中') {
+                        badgeHtml = '<span class="ml-3 align-middle bg-red-200 text-red-900 text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm inline-flex items-center gap-1">警報級(中)</span>';
+                    }
+
+                    let sectionHtml = `<div class="mb-10"><h3 class="text-xl font-black text-slate-900 mb-5 border-l-4 border-slate-800 pl-3 leading-none flex items-center">${areaName}${badgeHtml}</h3>`;
+                    
+                    // --- ランクテーブル ---
+                    let rankKeys = Object.keys(data.rankTypes);
+                    rankKeys.sort((a, b) => getSortIndex(a, SORT_ORDER_RANK) - getSortIndex(b, SORT_ORDER_RANK));
+
+                    if (rankKeys.length > 0) {
+                        const activeTimeIds = timeDefineIds.filter(tid => rankKeys.some(type => tid in data.rankTypes[type]));
+                        if (activeTimeIds.length > 0) {
+                            sectionHtml += `<div class="mb-6">
+                                <div class="text-[10px] font-black text-slate-500 mb-2 uppercase tracking-widest flex items-center gap-1.5"><i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-red-500"></i> 警報級の可能性（リスク）</div>
+                                <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm custom-scrollbar">
+                                <table class="analysis-table w-full min-w-max text-xs">
+                                <thead><tr class="bg-slate-50/80 border-b border-slate-200">
+                                <th class="py-3 px-4 font-black text-slate-800 text-left sticky left-0 z-10 bg-slate-50 shadow-[1px_0_0_#e2e8f0]">種類</th>
+                                ${activeTimeIds.map(tid => `<th class="py-3 px-4 font-bold text-slate-600 text-center leading-tight whitespace-nowrap min-w-[80px]">${timeDefinesMap[tid]}</th>`).join('')}
+                                </tr></thead><tbody class="divide-y divide-slate-100">`;
+                            
+                            rankKeys.forEach(typeName => {
+                                sectionHtml += `<tr class="hover:bg-slate-50/50 transition-colors"><td class="py-3.5 px-4 font-black text-slate-800 sticky left-0 z-10 bg-white shadow-[1px_0_0_#f1f5f9] group-hover:bg-slate-50/50 transition-colors">${typeName}</td>`;
+                                activeTimeIds.forEach(tid => {
+                                    const val = data.rankTypes[typeName][tid] || "なし";
+                                    let display = `<span class="rank-text-none">―</span>`;
+                                    if (val === '高') display = `<span class="rank-high">高</span>`;
+                                    else if (val === '中') display = `<span class="rank-mid">中</span>`;
+                                    else if (val !== 'なし' && val !== '') display = `<span class="text-slate-800 font-bold">${val}</span>`;
+                                    sectionHtml += `<td class="py-3.5 px-4 text-center">${display}</td>`;
+                                });
+                                sectionHtml += `</tr>`;
+                            });
+                            sectionHtml += `</tbody></table></div></div>`;
+                        }
+                    }
+
+                    // --- 詳細予測テーブル ---
+                    let detailKeys = Object.keys(data.detailTypes);
+                    detailKeys.sort((a, b) => getSortIndex(a, SORT_ORDER_DETAIL) - getSortIndex(b, SORT_ORDER_DETAIL));
+
+                    if (detailKeys.length > 0) {
+                        const activeTimeIds = timeDefineIds.filter(tid => detailKeys.some(type => tid in data.detailTypes[type]));
+                        if (activeTimeIds.length > 0) {
+                            sectionHtml += `<div class="mb-4">
+                                <div class="text-[10px] font-black text-slate-500 mb-2 uppercase tracking-widest flex items-center gap-1.5"><i data-lucide="bar-chart-2" class="w-3.5 h-3.5 text-blue-500"></i> 詳細予測値</div>
+                                <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm custom-scrollbar">
+                                <table class="analysis-table w-full min-w-max text-xs">
+                                <thead><tr class="bg-[#f0f9ff] border-b border-slate-200">
+                                <th class="py-3 px-4 font-black text-slate-800 text-left sticky left-0 z-10 bg-[#f0f9ff] shadow-[1px_0_0_#e2e8f0]">予測項目</th>
+                                ${activeTimeIds.map(tid => `<th class="py-3 px-4 font-bold text-slate-600 text-center leading-tight whitespace-nowrap min-w-[100px]">${timeDefinesMap[tid].replace(/から/g, '<br>〜')}</th>`).join('')}
+                                </tr></thead><tbody class="divide-y divide-slate-100">`;
+                            
+                            detailKeys.forEach(typeName => {
+                                sectionHtml += `<tr class="hover:bg-slate-50/50 transition-colors"><td class="py-3.5 px-4 font-black text-slate-700 sticky left-0 z-10 bg-white shadow-[1px_0_0_#f1f5f9] group-hover:bg-slate-50/50 transition-colors">${typeName}</td>`;
+                                activeTimeIds.forEach(tid => {
+                                    const val = data.detailTypes[typeName][tid];
+                                    let display = `<span class="text-slate-300 font-bold">―</span>`;
+                                    if (val) display = `<span class="text-slate-700 font-medium leading-relaxed">${formatDetailText(val)}</span>`;
+                                    sectionHtml += `<td class="py-3.5 px-4 text-center">${display}</td>`;
+                                });
+                                sectionHtml += `</tr>`;
+                            });
+                            sectionHtml += `</tbody></table></div></div>`;
+                        }
+                    }
+
+                    // --- 補足テキスト ---
+                    if (data.text) {
+                        sectionHtml += `<div class="p-4 bg-amber-50/80 border border-amber-200 rounded-[1.2rem] text-xs text-amber-900 leading-relaxed font-bold shadow-sm mt-4 flex gap-3 items-start"><i data-lucide="info" class="w-5 h-5 shrink-0 text-amber-600 mt-0.5"></i><div>${data.text.replace(/\n/g, '<br>')}</div></div>`;
+                    }
+                    
+                    sectionHtml += `</div>`;
+                    html += sectionHtml;
+                }
+            });
+            
+            if (html === "") return "";
+            
+            return `<div class="mb-10 p-5 sm:p-6 bg-white border border-slate-200 rounded-[2rem] shadow-sm"><h4 class="text-sm font-black tracking-tight mb-6 text-slate-800 pb-3 border-b border-slate-100 flex items-center gap-2"><i data-lucide="file-text" class="w-4 h-4 text-slate-400"></i> ${titleText}</h4>${html}</div>`;
+        }
+
+        function showPrefDetail(prefId) {
+            const prefName = PREF_MAP[prefId];
+            const detailTitle = document.getElementById('detailTitle');
+            const detailContent = document.getElementById('detailContent');
+            const rightPane = document.getElementById('rightPane');
+            const leftPane = document.getElementById('leftPane');
+
+            let targetRegion = null;
+            for (const group of REGION_GROUPS) {
+                const region = group.regions.find(r => r.name === prefName);
+                if (region) { targetRegion = region; break; }
+            }
+
+            const matchingFeeds = allFeedData.filter(item => {
+                return targetRegion && targetRegion.keywords.some(k => item.author && item.author.includes(k) || item.title && item.title.includes(k));
+            });
+
+            matchingFeeds.sort((a, b) => {
+                const getScore = (title) => {
+                    if (title.includes("警報級の可能性（明日まで）")) return 1;
+                    if (title.includes("早期注意情報")) return 2;
+                    if (title.includes("府県天気予報")) return 5;
+                    return 10;
+                };
+                const scoreDiff = getScore(a.title) - getScore(b.title);
+                if (scoreDiff !== 0) return scoreDiff;
+                return (a.author || "").localeCompare(b.author || "", 'ja');
+            });
+
+            if (detailTitle) {
+                let suffix = '';
+                const uniqueAuthors = new Set(matchingFeeds.map(f => f.author).filter(Boolean));
+                if (uniqueAuthors.size > 1) {
+                    suffix = `<span class="text-xs text-slate-500 font-bold ml-2 align-middle">(${uniqueAuthors.size}区分)</span>`;
+                }
+                detailTitle.innerHTML = prefName + suffix;
+            }
+
+            let html = `<div class="space-y-6">`;
+
+            if (matchingFeeds.length === 0) {
+                html += `<div class="text-center py-12 text-xs text-slate-400 font-bold border border-dashed border-slate-300 rounded-[1.5rem] bg-white">この地域に対する警報級リスク予測情報はありません。</div>`;
+            } else {
+                matchingFeeds.forEach(feed => {
+                    const xmlText = xmlDocs[feed.link];
+                    if (xmlText) {
+                        html += `<div class="relative">
+                            <div class="mb-2 text-[10px] font-bold text-slate-500 flex items-center gap-2 px-1">
+                                <span class="bg-slate-100 border border-slate-200 text-slate-600 px-2 py-0.5 rounded shadow-sm">${feed.author}</span>
+                                <span>${feed.updated.toLocaleString('ja-JP')} 発表</span>
+                            </div>`;
+                        const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+                        html += generateAnalysisHtml(doc, feed.title);
+                        html += `</div>`;
+                    }
+                });
+            }
+
+            const rawDataStr = matchingFeeds.map(f => `<!-- TITLE: ${f.title} \n     AUTHOR: ${f.author} \n     LINK: ${f.link} -->\n${xmlDocs[f.link] || ''}`).join('\n\n\n');
+            
+            html += `<div id="rawJsonArea" class="hidden mt-8">
+                <div class="flex items-center justify-between bg-slate-800 text-slate-200 px-4 py-2 rounded-t-2xl text-[10px] font-mono border border-slate-700">
+                    <span class="flex items-center gap-2"><i data-lucide="file-code" class="w-4 h-4 text-slate-400"></i> RAW XML DATA</span>
+                    <button onclick="copyRawJson()" class="hover:text-white transition-colors bg-slate-700 px-3 py-1 rounded-lg">コピー</button>
+                </div>
+                <textarea id="rawTextArea" class="w-full h-[400px] bg-slate-900 text-green-400 font-mono text-[10px] p-5 rounded-b-2xl focus:outline-none border-t-0 border border-slate-800 custom-scrollbar block resize-none leading-relaxed shadow-inner" readonly>${escapeHtml(rawDataStr)}</textarea>
+            </div>`;
+
+            html += `</div>`;
+            
+            if (detailContent) detailContent.innerHTML = html;
+            lucide.createIcons();
+
+            if (rightPane) rightPane.classList.remove('translate-x-full');
+            if (leftPane && window.innerWidth >= 768) {
+                leftPane.classList.add('md:mr-[450px]', 'lg:mr-[550px]');
+            } else {
+                const backBtn = document.getElementById('headerBackButton');
+                if (backBtn) backBtn.classList.remove('hidden');
+                const viewToggle = document.getElementById('viewToggle');
+                if (viewToggle) viewToggle.classList.add('hidden');
+            }
+
+            setTimeout(() => { if (map) map.invalidateSize(); }, 300);
+        }
+
+        function escapeHtml(unsafe) {
+            return (unsafe || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        window.closeDetail = function() {
+            const rightPane = document.getElementById('rightPane');
+            const leftPane = document.getElementById('leftPane');
+
+            if (rightPane) rightPane.classList.add('translate-x-full');
+            if (leftPane) leftPane.classList.remove('md:mr-[450px]', 'lg:mr-[550px]');
+
+            selectedPrefId = null;
+            renderMapLayers();
+
+            if (window.innerWidth < 768) {
+                const viewToggle = document.getElementById('viewToggle');
+                if (viewToggle) viewToggle.classList.remove('hidden');
+                const backBtn = document.getElementById('headerBackButton');
+                if (backBtn) backBtn.classList.add('hidden');
+            }
+
+            setTimeout(() => { if (map) map.invalidateSize(); }, 300);
+        }
+
+        window.handleGlobalBack = function() {
+            closeDetail();
+            if (map) map.setView([38, 137], window.innerWidth < 640 ? 4.5 : 5.2);
+        }
+
+        function renderListView() {
+            const grid = document.getElementById('prefGrid');
+            if (!grid) return;
+            grid.innerHTML = '';
+
+            const prefDataList = Object.keys(PREF_MAP).map(id => {
+                const name = PREF_MAP[id];
+                const score = getPrefRiskScore(name);
+                let targetRegion = null;
+                for (const group of REGION_GROUPS) {
+                    const region = group.regions.find(r => r.name === name);
+                    if (region) { targetRegion = region; break; }
+                }
+                const hasData = targetRegion && allFeedData.some(item => targetRegion.keywords.some(k => item.author && item.author.includes(k) || item.title && item.title.includes(k)));
+                return { id, name, score, hasData };
+            });
+
+            prefDataList.sort((a, b) => {
+                if (a.hasData && !b.hasData) return -1;
+                if (!a.hasData && b.hasData) return 1;
+                if (a.score !== b.score) return b.score - a.score;
+                return a.id.localeCompare(b.id);
+            });
+
+            prefDataList.forEach(data => {
+                const { id, name, score, hasData } = data;
+                const card = document.createElement('div');
+
+                if (hasData) {
+                    card.className = "bg-white p-5 rounded-[1.5rem] border border-slate-200 shadow-sm hover:shadow-xl hover:border-blue-300 cursor-pointer group transition-all relative overflow-hidden";
+                    card.onclick = () => {
+                        selectedPrefId = id;
+                        switchView('map');
+                        showPrefDetail(id);
+                        
+                        if (japanGeoData && map) {
+                            const targetPrefFeature = japanGeoData.features.find(f => {
+                                const fid = f.properties.id ? String(f.properties.id).padStart(2, "0") : (f.properties.pref ? String(f.properties.pref).padStart(2, "0") : "");
+                                return fid === id;
+                            });
+                            if (targetPrefFeature) {
+                                map.fitBounds(L.geoJson(targetPrefFeature).getBounds(), { padding: [50, 50] });
+                            }
+                        }
+                    };
+
+                    const badgeHtml = score === 2 ? `<span class="bg-[#dc2626] text-white px-2 py-0.5 rounded-[4px] font-black text-[10px]">可能性 高</span>` : 
+                                      score === 1 ? `<span class="bg-[#fca5a5] text-[#7f1d1d] px-2 py-0.5 rounded-[4px] font-black text-[10px]">可能性 中</span>` : 
+                                      `<span class="border border-slate-200 text-slate-400 px-2 py-0.5 rounded-[4px] font-bold text-[10px]">予測なし</span>`;
+
+                    card.innerHTML = `<div class="flex justify-between items-start mb-3">
+                        <h3 class="text-lg font-black text-slate-800 group-hover:text-blue-600 transition-colors">${name}</h3>
+                        ${badgeHtml}
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <p class="text-[10px] text-slate-400 font-bold">クリックして詳細を表示</p>
+                        <i data-lucide="chevron-right" class="w-4 h-4 text-slate-200 group-hover:text-blue-600 group-hover:translate-x-1 transition-transform"></i>
+                    </div>`;
+                } else {
+                    card.className = "bg-white p-5 rounded-[1.5rem] border border-slate-100 opacity-60";
+                    card.innerHTML = `<h3 class="text-lg font-black text-slate-400 mb-1">${name}</h3>
+                    <span class="text-[10px] font-bold text-slate-300">データなし</span>`;
+                }
+
+                grid.appendChild(card);
+            });
+            lucide.createIcons();
+        }
+
+        window.switchView = function(view) {
+            const btnMap = document.getElementById('btnMap');
+            const btnMatrix = document.getElementById('btnMatrix');
+            const btnList = document.getElementById('btnList');
+            
+            const mapView = document.getElementById('mapView');
+            const matrixView = document.getElementById('matrixView');
+            const listView = document.getElementById('listView');
+
+            const btns = [btnMap, btnMatrix, btnList];
+            const views = [mapView, matrixView, listView];
+
+            btns.forEach(btn => {
+                if (btn) {
+                    // hidden クラスは維持しながら、選択状態をコントロール
+                    const isHidden = btn.classList.contains('hidden');
+                    btn.className = "px-3 py-1.5 rounded-lg text-xs font-black transition-all text-slate-500 hover:text-slate-700 shrink-0" + (isHidden ? " hidden" : "");
+                }
+            });
+            views.forEach(v => {
+                if (v) v.classList.add('translate-x-full', 'opacity-0', 'pointer-events-none');
+            });
+
+            if (view === 'map') {
+                if (btnMap) btnMap.className = "px-3 py-1.5 rounded-lg text-xs font-black transition-all bg-white text-blue-600 shadow-sm shrink-0";
+                if (mapView) mapView.classList.remove('translate-x-full', 'opacity-0', 'pointer-events-none');
+                setTimeout(() => { if (map) map.invalidateSize(); }, 300);
+            } else if (view === 'matrix') {
+                if (btnMatrix) btnMatrix.className = "px-3 py-1.5 rounded-lg text-xs font-black transition-all bg-white text-blue-600 shadow-sm shrink-0";
+                if (matrixView) matrixView.classList.remove('translate-x-full', 'opacity-0', 'pointer-events-none');
+                renderMatrixTable();
+                closeDetail();
+            } else {
+                if (btnList) btnList.className = "px-3 py-1.5 rounded-lg text-xs font-black transition-all bg-white text-blue-600 shadow-sm shrink-0";
+                if (listView) listView.classList.remove('translate-x-full', 'opacity-0', 'pointer-events-none');
+                closeDetail();
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'f') {
+                const rawJsonArea = document.getElementById('rawJsonArea');
+                if (rawJsonArea) {
+                    rawJsonArea.classList.toggle('hidden');
+                    if (!rawJsonArea.classList.contains('hidden')) {
+                        rawJsonArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }
+            }
+            if (e.key.toLowerCase() === 'e') {
+                showAllFeedsModal();
+            }
+            if (e.key.toLowerCase() === 'r') {
+                showRiskListModal();
+            }
+        });
+
+        window.showRiskListModal = function() {
+            const modal = document.getElementById('riskListModal');
+            const content = document.getElementById('riskListContent');
+            const count = document.getElementById('riskCount');
+            
+            if (modal && content) {
+                const summary = getRiskSummary();
+                count.innerText = summary.length;
+                
+                if (summary.length === 0) {
+                    content.innerHTML = `<div class="col-span-full text-center py-16 text-sm text-slate-500 font-bold bg-white border border-dashed border-slate-300 rounded-[1.5rem] shadow-sm"><i data-lucide="shield-check" class="w-12 h-12 text-emerald-400 mx-auto mb-4"></i>現在、全国で警報級の可能性（高・中）が発表されている地域はありません。</div>`;
+                } else {
+                    content.innerHTML = summary.map(item => {
+                        const risksHtml = item.risks.map(r => {
+                            const badgeClass = r.rank === '高' ? 'bg-red-600 text-white shadow-[0_2px_4px_rgba(220,38,38,0.2)]' : 'bg-red-200 text-red-900';
+                            return `<span class="${badgeClass} px-2.5 py-1 rounded-[6px] font-black text-[11px] shrink-0 border border-transparent whitespace-nowrap">${r.type} (${r.rank})</span>`;
+                        }).join('');
+                        
+                        return `
+                        <div class="bg-white p-5 rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col cursor-pointer hover:border-red-400 hover:shadow-lg transition-all group" onclick="hideRiskListModal(); switchView('matrix');">
+                            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+                                <h3 class="text-lg font-black text-slate-800 group-hover:text-red-600 transition-colors">${item.name}</h3>
+                                <i data-lucide="chevron-right" class="w-5 h-5 text-slate-300 group-hover:text-red-500 group-hover:translate-x-1 transition-transform"></i>
+                            </div>
+                            <div class="flex flex-wrap gap-2">${risksHtml}</div>
+                        </div>`;
+                    }).join('');
+                }
+                lucide.createIcons();
+                modal.classList.remove('hidden');
+            }
+        };
+
+        window.hideRiskListModal = function() {
+            const modal = document.getElementById('riskListModal');
+            if (modal) modal.classList.add('hidden');
+        };
+
+        window.showAllFeedsModal = function() {
+            const modal = document.getElementById('feedListModal');
+            const tbody = document.getElementById('feedListTableBody');
+            const count = document.getElementById('feedCount');
+            
+            if (modal && tbody) {
+                count.innerText = allFeedData.length;
+                tbody.innerHTML = allFeedData.map(feed => `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="p-4 whitespace-nowrap text-slate-500 font-mono text-xs">${feed.updated.toLocaleString('ja-JP')}</td>
+                        <td class="p-4 whitespace-nowrap font-bold text-slate-700 text-xs">${feed.author || '-'}</td>
+                        <td class="p-4 text-slate-800 font-medium text-[13px]">${feed.title}</td>
+                        <td class="p-4 text-center">
+                            <a href="${feed.link}" target="_blank" class="text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-[11px] font-black transition-colors">
+                                <i data-lucide="external-link" class="w-3.5 h-3.5"></i> 開く
+                            </a>
+                        </td>
+                    </tr>
+                `).join('');
+                lucide.createIcons();
+                modal.classList.remove('hidden');
+            }
+        };
+
+        window.hideAllFeedsModal = function() {
+            const modal = document.getElementById('feedListModal');
+            if (modal) modal.classList.add('hidden');
+        };
+
+        window.copyRawJson = function() {
+            const rawTextArea = document.getElementById('rawTextArea');
+            if (rawTextArea) {
+                rawTextArea.select();
+                document.execCommand('copy');
+                
+                const copyBtn = document.querySelector('#rawJsonArea button');
+                if (copyBtn) {
+                    copyBtn.innerText = "コピー完了！";
+                    setTimeout(() => { copyBtn.innerText = "コピー"; }, 1500);
+                }
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

@@ -1,0 +1,2164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>EWCアメダス</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+        
+        body { font-family: 'Noto Sans JP', sans-serif; -webkit-tap-highlight-color: transparent; text-align: left;}
+        
+        #map { height: 100%; width: 100%; background-color: #e0f2fe; z-index: 1; }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .radar-tiles {
+            image-rendering: auto !important;
+            mix-blend-mode: multiply;
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        .leaflet-tooltip-station {
+            background: rgba(15, 23, 42, 0.95);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 5px 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+
+        .app-container { display: flex; flex-direction: column; height: 100vh; position: relative; overflow: hidden; }
+        .sidebar-transition { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease; }
+
+        @media (min-width: 768px) {
+            .app-container { flex-direction: row; }
+            .map-section { flex: 1; position: relative; }
+            .sidebar-section { width: 360px; height: 100% !important; z-index: 20; position: relative; border-right: 1px solid rgba(0,0,0,0.05); }
+            #detailPanel { top: 1rem; left: 1rem; width: 28rem; border-radius: 24px; position: absolute; z-index: 1000; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.5); }
+            .mobile-close-btn { display: none !important; }
+        }
+
+        @media (max-width: 767px) {
+            .map-section { position: absolute; inset: 0; z-index: 1; }
+            .sidebar-section { 
+                position: fixed; 
+                inset: 0;
+                width: 100%;
+                height: 100dvh;
+                z-index: 2000; 
+                transform: translateX(-100%);
+                background: white;
+            }
+            .sidebar-open { transform: translateX(0); }
+            
+            #detailPanel { 
+                position: fixed; 
+                inset: 0;
+                width: 100%;
+                height: 100dvh;
+                z-index: 3000; 
+                overflow-y: auto;
+                padding-bottom: env(safe-area-inset-bottom);
+                background: white;
+            }
+        }
+
+        .safe-top { padding-top: calc(env(safe-area-inset-top) + 0.5rem); }
+        .legend-dot { width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+
+        .radar-active-btn {
+            background-color: #2563eb !important;
+            color: white !important;
+            border-color: #1e40af !important;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.5);
+        }
+
+        #mapLegend {
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            max-height: 50vh;
+            opacity: 1;
+        }
+        #mapLegend.collapsed-legend {
+            height: 48px;
+            overflow: hidden;
+        }
+        #mapLegend.hide-legend {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transform: translateY(20px);
+        }
+
+        .info-card {
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            padding: 0.75rem;
+            border-radius: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            text-align: center;
+        }
+        .info-card-label { font-size: 9px; font-weight: 900; color: #94a3b8; font-style: italic; text-transform: uppercase; }
+        .info-card-value { font-size: 0.95rem; font-weight: 900; color: #1e293b; letter-spacing: -0.025em; }
+
+        .custom-select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='3'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5' /%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            background-size: 1.25rem;
+        }
+
+        /* テーブルビュー用レイアウトスタイル */
+        .table-view-active #map { display: none !important; }
+        .table-view-active #mapLegend { display: none !important; }
+        .table-view-active #detailPanel { display: none !important; }
+        .table-view-active #sidebar { display: none !important; } 
+        .table-view-active #timeSliderContainer { display: none !important; } 
+        .table-view-active #listViewContainer { display: flex !important; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-900 overflow-hidden text-left">
+
+    <div id="loading" class="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center">
+        <div class="relative flex items-center justify-center mb-8">
+            <svg class="w-36 h-36 transform -rotate-90">
+                <circle cx="72" cy="72" r="66" stroke="currentColor" stroke-width="6" fill="transparent" class="text-slate-50" />
+                <circle id="progress-circle" cx="72" cy="72" r="66" stroke="currentColor" stroke-width="6" fill="transparent" stroke-dasharray="414.69" stroke-dashoffset="414.69" class="text-blue-600 transition-all duration-300 ease-out" />
+            </svg>
+            <div id="progress-text" class="absolute text-3xl font-black text-blue-600 italic tracking-tighter">0%</div>
+        </div>
+        <p id="loading-subtext" class="text-[12px] font-black tracking-widest text-slate-400 uppercase italic text-center whitespace-pre-wrap">データを同期中</p>
+    </div>
+
+    <div id="graphModal" class="fixed inset-0 z-[4000] bg-slate-900/60 flex items-center justify-center p-4 md:p-8 backdrop-blur-sm transition-all duration-300 opacity-0 pointer-events-none">
+        <div class="bg-white w-full max-w-3xl rounded-[2rem] shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 scale-95" id="graphModalContent">
+            <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600">
+                        <i data-lucide="bar-chart-2" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-lg font-black text-slate-800" id="graphModalTitle">観測所名</h4>
+                        <div class="flex items-center gap-2 mt-0.5">
+                            <p class="text-[10px] font-bold text-slate-400">過去48時間の推移</p>
+                            <select id="graphIntervalSelect" onchange="changeGraphInterval(this.value)" class="bg-slate-100 text-slate-600 text-[10px] font-black py-0.5 px-2 rounded-md outline-none cursor-pointer border border-slate-200">
+                                <option value="10" selected>10分ごと</option>
+                                <option value="60">1時間ごと</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="closeGraphModal()" class="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-full active:scale-90 shadow-sm text-slate-500 hover:bg-slate-100 transition-all">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-5 flex-1 flex flex-col bg-white overflow-y-auto">
+                <div id="graphTabs" class="flex gap-2 overflow-x-auto hide-scrollbar pb-2"></div>
+                <div id="dailyExtremes" class="hidden w-full mt-3"></div>
+                <div id="chartContainer" class="relative h-64 md:h-72 w-full mt-3"></div>
+                <p class="text-[9px] text-slate-400 text-center mt-2 font-bold">グラフをピンチ、または下のボタンで拡大縮小できます</p>
+                <div class="flex justify-between items-center mt-4 bg-slate-50 p-2 rounded-xl">
+                    <div class="flex gap-1.5">
+                        <button onclick="panChart('left')" class="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl active:scale-95 shadow-sm text-slate-500 hover:text-blue-600"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+                        <button onclick="panChart('right')" class="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl active:scale-95 shadow-sm text-slate-500 hover:text-blue-600"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="flex gap-1.5">
+                        <button onclick="zoomChart('out')" class="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl active:scale-95 shadow-sm text-slate-500 hover:text-blue-600"><i data-lucide="minus" class="w-5 h-5"></i></button>
+                        <button onclick="zoomChart('in')" class="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl active:scale-95 shadow-sm text-slate-500 hover:text-blue-600"><i data-lucide="plus" class="w-5 h-5"></i></button>
+                        <button onclick="resetChartZoom()" class="px-4 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl active:scale-95 shadow-sm text-[11px] font-bold text-slate-500 hover:text-blue-600">リセット</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="rawDataModal" class="fixed inset-0 z-[5000] bg-slate-900/80 flex items-center justify-center p-4 md:p-8 backdrop-blur-sm transition-all duration-300 opacity-0 pointer-events-none">
+        <div class="bg-slate-950 text-emerald-400 w-full max-w-3xl h-[80vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden border border-emerald-500/30 transform transition-all duration-300 scale-95 font-mono" id="rawDataModalContent">
+            <div class="p-5 border-b border-emerald-500/20 flex justify-between items-center bg-slate-900">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-emerald-950 rounded-xl flex items-center justify-center text-emerald-400 border border-emerald-500/20">
+                        <i data-lucide="terminal" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-black text-emerald-200" id="rawDataModalTitle">生データ</h4>
+                        <p class="text-[9px] font-bold text-emerald-500/70">RAW API RESPONSE (JSON)</p>
+                    </div>
+                </div>
+                <button onclick="closeRawDataModal()" class="w-10 h-10 flex items-center justify-center bg-slate-800 border border-emerald-500/30 rounded-full active:scale-90 text-emerald-400 hover:bg-emerald-900/50 transition-all shadow-md">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-5 flex-1 overflow-y-auto custom-scrollbar bg-slate-950 text-xs leading-relaxed">
+                <pre id="rawJsonCode" class="whitespace-pre-wrap break-all select-text"></pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container" id="appMainFrame">
+        <aside id="sidebar" class="sidebar-section flex flex-col overflow-hidden order-2 md:order-1 sidebar-transition">
+            <header class="bg-white border-b border-slate-100 p-6 flex flex-col gap-4 pt-12 md:pt-6">
+                <div class="flex items-center justify-between">
+                    <div class="flex flex-col text-left">
+                        <h1 class="text-3xl font-black tracking-tighter text-blue-900 italic leading-none">EWCアメダス</h1>
+                        <div id="obsTime" class="text-[10px] text-blue-600 font-black mt-2 uppercase tracking-widest text-left">取得中...</div>
+                    </div>
+                    <button onclick="toggleSidebarViaButton()" class="mobile-close-btn w-10 h-10 flex items-center justify-center bg-slate-100 rounded-full active:scale-90">
+                        <i data-lucide="x" class="w-6 h-6 text-slate-500"></i>
+                    </button>
+                </div>
+                
+                <div class="relative">
+                    <select id="modeSelector" onchange="switchMode(this.value)" class="custom-select w-full py-3.5 px-5 bg-slate-100 rounded-2xl text-xs font-black text-slate-700 outline-none ring-2 ring-transparent focus:ring-blue-500/10 transition-all shadow-inner">
+                        <optgroup label="気温・湿度">
+                            <option value="temp" selected>気温 (℃)</option>
+                            <option value="maxtemp">最高気温 (℃)</option>
+                            <option value="mintemp">最低気温 (℃)</option>
+                            <option value="humidity">湿度 (%)</option>
+                        </optgroup>
+                        <optgroup label="風・日照">
+                            <option value="wind">風向・風速 (m/s)</option>
+                            <option value="sun10m">日照時間: 10分 (分)</option>
+                            <option value="sun1h">日照時間: 1時間 (h)</option>
+                        </optgroup>
+                        <optgroup label="降水量">
+                            <option value="precipitation10m">降水量: 10分 (mm)</option>
+                            <option value="precipitation1h">降水量: 1時間 (mm)</option>
+                            <option value="precipitation3h">降水量: 3時間 (mm)</option>
+                            <option value="precipitation24h">降水量: 24時間 (mm)</option>
+                        </optgroup>
+                        <optgroup label="気圧">
+                            <option value="pressure">現地気圧 (hPa)</option>
+                            <option value="normalPressure">海面更正気圧 (hPa)</option>
+                        </optgroup>
+                        <optgroup label="積雪・降雪">
+                            <option value="snow">積雪深 (cm)</option>
+                            <option value="snow1h">1時間降雪量 (cm)</option>
+                            <option value="snow6h">6時間降雪量 (cm)</option>
+                            <option value="snow12h">12時間降雪量 (cm)</option>
+                            <option value="snow24h">24時間降雪量 (cm)</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="relative">
+                        <select id="areaSelector" onchange="onAreaChange(this.value)" class="custom-select w-full py-3.5 pl-4 pr-9 bg-slate-100 rounded-xl text-xs font-black text-slate-700 outline-none ring-2 ring-transparent transition-all">
+                            <option value="all">全国（地方）</option>
+                            <option value="hokkaido">北海道</option>
+                            <option value="tohoku">東北</option>
+                            <option value="kanto">関東</option>
+                            <option value="chubu">中部</option>
+                            <option value="kinki">近畿</option>
+                            <option value="chugoku">中国</option>
+                            <option value="shikoku">四国</option>
+                            <option value="kyushu">九州</option>
+                            <option value="okinawa">沖縄</option>
+                        </select>
+                    </div>
+                    <div class="relative">
+                        <select id="prefSelector" onchange="onPrefChange(this.value)" class="custom-select w-full py-3.5 pl-4 pr-9 bg-slate-100 rounded-xl text-xs font-black text-slate-700 outline-none ring-2 ring-transparent transition-all disabled:opacity-55" disabled>
+                            <option value="all">都府県</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button onclick="showMaxTempRanking()" class="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-2 active:scale-95">
+                    全国 最高気温ランキングを表示
+                </button>
+
+                <div class="relative mt-2">
+                    <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                    <input type="text" id="searchBox" oninput="searchStation(this.value)" placeholder="観測所を検索..." class="w-full pl-10 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all">
+                </div>
+            </header>
+
+            <div id="listModeHeader" class="bg-slate-200/50 px-4 py-1.5 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center flex items-center justify-center gap-2">
+                <span id="listModeTitleText">実況値リスト</span>
+            </div>
+
+            <div id="stationList" class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2 bg-slate-50/20"></div>
+        </aside>
+
+        <section class="map-section relative order-1 md:order-2 flex-grow">
+            <div id="map"></div>
+            
+            <div id="detailPanel" class="hidden glass-panel sidebar-transition custom-scrollbar"></div>
+
+            <div id="timeSliderContainer" class="absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-xl glass-panel p-4 rounded-[1.5rem] border border-slate-200/80 shadow-2xl flex flex-col gap-2.5 transition-all duration-300 pointer-events-auto">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-2.5">
+                        <button id="playBtn" onclick="togglePlayTime()" class="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-full transition-all shadow-md">
+                            <i data-lucide="play" class="w-4 h-4 fill-current"></i>
+                        </button>
+                        <div class="text-left">
+                            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">過去の値</p>
+                            <p id="sliderTimeDisplay" class="text-xs font-black text-slate-800 mt-1.5 leading-none">取得中...</p>
+                        </div>
+                    </div>
+                    <button id="sliderStepDisplay" onclick="jumpToLatest()" class="text-[10px] font-black bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 active:scale-95 py-1.5 px-3.5 rounded-xl transition-all shadow-sm select-none">
+                        実況へ
+                    </button>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-[8px] font-black text-slate-400 uppercase tracking-wider">24時間前</span>
+                    <input type="range" id="timeRangeSlider" min="0" max="144" value="144" oninput="onSliderInput(this.value)" class="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 focus:outline-none">
+                    <span class="text-[8px] font-black text-blue-600 uppercase tracking-wider italic">最新実況</span>
+                </div>
+            </div>
+
+            <div id="listViewContainer" class="hidden absolute inset-0 bg-slate-50 z-[1100] overflow-hidden flex flex-col p-4 md:p-6 safe-top">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="text-left">
+                        <span id="listTitleMode" class="text-[9px] md:text-[10px] font-black text-blue-600 uppercase italic tracking-widest">実況データ一覧</span>
+                        <h2 class="text-base md:text-xl font-black text-slate-900 tracking-tight flex items-center gap-1.5 flex-wrap">
+                            <span>実況データ一覧</span>
+                        </h2>
+                    </div>
+                    <button onclick="toggleTableMode(false)" class="flex items-center gap-1 px-3 py-2 md:gap-1.5 md:px-4 md:py-2.5 bg-blue-600 text-white rounded-xl md:rounded-2xl active:scale-95 transition-all text-[10px] md:text-xs font-black shadow-lg">
+                        <i data-lucide="map" class="w-3.5 h-3.5 md:w-4 md:h-4"></i>
+                        <span>地図に戻る</span>
+                    </button>
+                </div>
+
+                <div class="bg-white p-2.5 md:p-4 rounded-xl md:rounded-2xl border border-slate-200 shadow-sm mb-3.5 grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+                    <div>
+                        <label class="block text-[8px] md:text-[9px] font-black text-slate-400 mb-0.5 md:mb-1 uppercase tracking-wider">観測要素</label>
+                        <select id="listModeSelector" onchange="switchMode(this.value)" class="custom-select w-full py-1.5 px-2 md:py-2.5 md:px-3 bg-slate-100 rounded-lg md:rounded-xl text-[10px] md:text-xs font-black text-slate-700 outline-none">
+                            <optgroup label="気温・湿度">
+                                <option value="temp">気温 (℃)</option>
+                                <option value="maxtemp">最高気温 (℃)</option>
+                                <option value="mintemp">最低気温 (℃)</option>
+                                <option value="humidity">湿度 (%)</option>
+                            </optgroup>
+                            <optgroup label="風・日照">
+                                <option value="wind">風向・風速 (m/s)</option>
+                                <option value="sun10m">日照時間: 10分 (分)</option>
+                                <option value="sun1h">日照時間: 1時間 (h)</option>
+                            </optgroup>
+                            <optgroup label="降水量">
+                                <option value="precipitation10m">降水量: 10分 (mm)</option>
+                                <option value="precipitation1h">降水量: 1時間 (mm)</option>
+                                <option value="precipitation3h">降水量: 3時間 (mm)</option>
+                                <option value="precipitation24h">降水量: 24時間 (mm)</option>
+                            </optgroup>
+                            <optgroup label="気圧">
+                                <option value="pressure">現地気圧 (hPa)</option>
+                                <option value="normalPressure">海面更正気圧 (hPa)</option>
+                            </optgroup>
+                            <optgroup label="積雪・降雪">
+                                <option value="snow">積雪深 (cm)</option>
+                                <option value="snow1h">1時間降雪量 (cm)</option>
+                                <option value="snow6h">6時間降雪量 (cm)</option>
+                                <option value="snow12h">12時間降雪量 (cm)</option>
+                                <option value="snow24h">24時間降雪量 (cm)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[8px] md:text-[9px] font-black text-slate-400 mb-0.5 md:mb-1 uppercase tracking-wider">地方</label>
+                        <select id="listAreaSelector" onchange="onAreaChange(this.value)" class="custom-select w-full py-1.5 px-2 md:py-2.5 md:px-3 bg-slate-100 rounded-lg md:rounded-xl text-[10px] md:text-xs font-black text-slate-700 outline-none">
+                            <option value="all">全国（地方）</option>
+                            <option value="hokkaido">北海道</option>
+                            <option value="tohoku">東北</option>
+                            <option value="kanto">関東</option>
+                            <option value="chubu">中部</option>
+                            <option value="kinki">近畿</option>
+                            <option value="chugoku">中国</option>
+                            <option value="shikoku">四国</option>
+                            <option value="kyushu">九州</option>
+                            <option value="okinawa">沖縄</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[8px] md:text-[9px] font-black text-slate-400 mb-0.5 md:mb-1 uppercase tracking-wider">都府県</label>
+                        <select id="listPrefSelector" onchange="onPrefChange(this.value)" class="custom-select w-full py-1.5 px-2 md:py-2.5 md:px-3 bg-slate-100 rounded-lg md:rounded-xl text-[10px] md:text-xs font-black text-slate-700 outline-none disabled:opacity-55" disabled>
+                            <option value="all">すべて</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[8px] md:text-[9px] font-black text-slate-400 mb-0.5 md:mb-1 uppercase tracking-wider">観測所を検索</label>
+                        <div class="relative">
+                            <i data-lucide="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 md:w-3.5 md:h-3.5 text-slate-400"></i>
+                            <input type="text" id="listSearchBox" oninput="onListSearchInput(this.value)" placeholder="検索..." class="w-full pl-7 md:pl-8 pr-2 py-1.5 md:py-2.5 bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl text-[10px] md:text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm custom-scrollbar">
+                    <table class="w-full table-fixed min-w-[720px] text-left border-collapse">
+                        <thead class="bg-slate-50 text-slate-500 text-[10px] font-black uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200">
+                            <tr id="tableHeaderRow">
+                                </tr>
+                        </thead>
+                        <tbody id="tableBody" class="divide-y divide-slate-100 text-xs font-bold text-slate-700">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="md:hidden absolute left-4 top-4 z-[1000] safe-top">
+                <button onclick="toggleSidebarViaButton()" class="w-12 h-12 flex items-center justify-center bg-blue-600 border border-blue-500 rounded-full shadow-xl text-white transition-all active:scale-90 pointer-events-auto">
+                    <i data-lucide="list" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <div class="absolute right-4 top-4 z-[1000] flex flex-col gap-3 items-end safe-top">
+                <button id="radarToggle" onclick="toggleRadar()" class="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-xl shadow-xl text-[10px] font-black leading-none uppercase tracking-tighter italic transition-all active:scale-90 pointer-events-auto">
+                    雨雲
+                </button>
+                <button onclick="resetView()" class="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-full shadow-xl text-slate-600 hover:text-blue-600 transition-all active:scale-90 pointer-events-auto">
+                    <i data-lucide="home" class="w-6 h-6"></i>
+                </button>
+                <button id="tableModeToggleBtn" onclick="toggleTableMode(true)" class="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-full shadow-xl text-slate-600 hover:text-blue-600 transition-all active:scale-90 pointer-events-auto" title="実況データ一覧を開く">
+                    <i data-lucide="align-justify" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <div id="mapLegend" class="absolute right-4 bottom-32 md:bottom-36 z-[1000] bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-xl border border-white/50 min-w-[140px] flex flex-col pointer-events-auto select-none">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-2 cursor-pointer" onclick="toggleLegend()">
+                    <div id="legend-title" class="text-[9px] font-black text-slate-400 uppercase italic">凡例</div>
+                    <i id="legend-toggle-icon" data-lucide="chevron-down" class="w-4 h-4 text-slate-400"></i>
+                </div>
+                <div id="legend-items" class="flex flex-col gap-1.5 overflow-y-auto custom-scrollbar pr-1"></div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        let map;
+        let stationTable = {};
+        let amedasData = {};
+        let markers = {};
+        let currentMode = 'temp'; 
+        let isSidebarOpen = false;
+        let isLegendCollapsed = false;
+        let isTableModeActive = false; 
+
+        let isRadarOn = false;
+        let radarLayer = null;
+        let latestRadarTime = null;
+        let selectedDate = null; 
+        let currentChart = null; 
+
+        let currentStationId = null; 
+        let currentStationData = {}; 
+        let currentGraphInterval = 10; 
+
+        let timeSteps = []; 
+        let currentStepIndex = 144; 
+        let isPlaying = false;
+        let playTimer = null;
+        let amedasDataCache = {}; 
+        let allStationsTimeSeries = {}; 
+
+        let sortColumn = 'val'; 
+        let sortDirection = 'desc'; 
+
+        let selectedArea = 'all';
+        let selectedPref = 'all';
+
+        const MAP_CENTER = [36.2, 137.5];
+        const MAP_ZOOM = 5;
+
+        function hexToRgba(hex, alpha) {
+            if (!hex) return `rgba(0, 0, 0, ${alpha})`;
+            const h = hex.replace('#', '');
+            const r = parseInt(h.substring(0, 2), 16) || 0;
+            const g = parseInt(h.substring(2, 4), 16) || 0;
+            const b = parseInt(h.substring(4, 6), 16) || 0;
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        const PREF_MAP = {
+            "11": "北海道(道北)", "12": "北海道(道北)", 
+            "13": "北海道(道東)", "14": "北海道(道東)", "15": "北海道(道東)", "16": "北海道(道東)", 
+            "17": "北海道(道央)", "18": "北海道(道央)", 
+            "19": "北海道(道南)", "20": "北海道(道南)", "21": "北海道(道南)", "22": "北海道(道南)", "23": "北海道(道南)", "24": "北海道(道南)",
+            "31": "青森県", "32": "岩手県", "33": "宮城県", "34": "秋田県", "35": "山形県", "36": "福島県",
+            "40": "茨城県", "41": "栃木県", "42": "群馬県", "43": "埼玉県", "44": "東京都", "45": "千葉県", "46": "神奈川県",
+            "48": "長野県", "49": "山梨県",
+            "50": "静岡県", "51": "愛知県", "52": "岐阜県", "53": "三重県",
+            "54": "新潟県", "55": "富山県", "56": "石川県", "57": "福井県",
+            "60": "滋賀県", "61": "京都府", "62": "大阪府", "63": "兵庫県", "64": "奈良県", "65": "和歌山県",
+            "66": "広島県", "67": "岡山県", "68": "島根県", "69": "鳥取県",
+            "71": "徳島県", "72": "香川県", "73": "愛媛県", "74": "高知県",
+            "81": "山口県", "82": "福岡県", "83": "佐賀県", "84": "長崎県", "85": "熊本県", "86": "大分県", "87": "宮崎県", "88": "鹿児島県",
+            "91": "沖縄県", "92": "沖縄県", "93": "沖縄県", "94": "沖縄県"
+        };
+
+        const REGION_PREFS = {
+            "hokkaido": ["北海道(道央)", "北海道(道北)", "北海道(道東)", "北海道(道南)"],
+            "tohoku": ["青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"],
+            "kanto": ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県", "伊豆・小笠原"],
+            "chubu": ["新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県", "静岡県", "愛知県", "三重県"],
+            "kinki": ["滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"],
+            "chugoku": ["鳥取県", "島根県", "岡山県", "広島県", "山口県"],
+            "shikoku": ["徳島県", "香川県", "愛媛県", "高知県"],
+            "kyushu": ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "奄美地方"],
+            "okinawa": ["沖縄県"]
+        };
+
+        const elements = {
+            temp: { name: "気温", unit: "℃" },
+            maxtemp: { name: "最高気温", unit: "℃" },
+            mintemp: { name: "最低気温", unit: "℃" },
+            humidity: { name: "湿度", unit: "%" },
+            pressure: { name: "現地気圧", unit: "hPa" },
+            normalPressure: { name: "海面更正気圧", unit: "hPa" },
+            wind: { name: "風向・風速", unit: "m/s" },
+            precipitation10m: { name: "10分降水量", unit: "mm" },
+            precipitation1h: { name: "1時間降水量", unit: "mm" },
+            precipitation3h: { name: "3時間降水量", unit: "mm" },
+            precipitation24h: { name: "24時間降水量", unit: "mm" },
+            snow: { name: "積雪深", unit: "cm" },
+            snow1h: { name: "1時間降雪量", unit: "cm" },
+            snow6h: { name: "6時間降雪量", unit: "cm" },
+            snow12h: { name: "12時間降雪量", unit: "cm" },
+            snow24h: { name: "24時間降雪量", unit: "cm" },
+            sun10m: { name: "10分日照", unit: "分" },
+            sun1h: { name: "1時間日照", unit: "時間" }
+        };
+
+        const RADAR_COLORS = [
+            { v: 80, c: "#ff28ff", l: "80mm～" },
+            { v: 50, c: "#ff2800", l: "50～80" },
+            { v: 30, c: "#ff9900", l: "30～50" },
+            { v: 20, c: "#faf500", l: "20～30" },
+            { v: 10, c: "#0041ff", l: "10～20" },
+            { v: 5,  c: "#2187da", l: "5～10" },
+            { v: 1,  c: "#c1dbf9", l: "1～5" },
+            { v: 0.1,c: "#f2f2ff", l: "0.1～1" },
+            { v: 0,  c: "#cbd5e1", l: "0mm" }
+        ];
+
+        const SNOW_COLORS = [
+            { v: 100, c: "#1e3a8a", l: "100cm以上" },
+            { v: 50,  c: "#1d4ed8", l: "50～100cm" },
+            { v: 20,  c: "#2563eb", l: "20～50cm" },
+            { v: 10,  c: "#3b82f6", l: "10～20cm" },
+            { v: 5,   c: "#60a5fa", l: "5～10cm" },
+            { v: 1,   c: "#93c5fd", l: "1～5cm" },
+            { v: 0.1, c: "#cbd5e1", l: "なし" }
+        ];
+
+        const TEMP_LEGEND = [
+            { v: 40, c: "#991b1b", l: "40℃以上" },
+            { v: 35, c: "#ef4444", l: "35～40℃" },
+            { v: 30, c: "#f472b6", l: "30～35℃" },
+            { v: 25, c: "#f97316", l: "25～30℃" },
+            { v: 20, c: "#eab308", l: "20～25℃" },
+            { v: 15, c: "#fde047", l: "15～20℃" },
+            { v: 10, c: "#e0f2fe", l: "10～15℃" },
+            { v: 5,  c: "#cbd5e1", l: "5～10℃" },
+            { v: 0,  c: "#94a3b8", l: "0～5℃" },
+            { v: -5, c: "#1e40af", l: "-5～0℃" },
+            { v: -10,c: "#1e3a8a", l: "-10℃以下" }
+        ];
+
+        const LEGENDS = {
+            temp: TEMP_LEGEND,
+            maxtemp: TEMP_LEGEND,
+            mintemp: TEMP_LEGEND,
+            precipitation1h: RADAR_COLORS,
+            precipitation10m: RADAR_COLORS,
+            precipitation3h: RADAR_COLORS,
+            precipitation24h: RADAR_COLORS,
+            wind: [
+                { v: 25, c: "#991b1b", l: "25m/s～" },
+                { v: 20, c: "#ef4444", l: "20～25" },
+                { v: 15, c: "#f97316", l: "15～20" },
+                { v: 10, c: "#eab308", l: "10～15" },
+                { v: 5,  c: "#3b82f6", l: "5～10" },
+                { v: 0.1,c: "#cbd5e1", l: "～5m/s" }
+            ],
+            humidity: [
+                { v: 90, c: "#8B22D3", l: "90%以上" },
+                { v: 80, c: "#0000FF", l: "80～90%" },
+                { v: 70, c: "#5DB0E5", l: "70～80%" },
+                { v: 60, c: "#4C873C", l: "60～70%" },
+                { v: 50, c: "#8CD350", l: "50～60%" },
+                { v: 40, c: "#C6F165", l: "40～50%" },
+                { v: 30, c: "#FDE14F", l: "30～40%" },
+                { v: 20, c: "#F59335", l: "20～30%" },
+                { v: 10, c: "#BD6F33", l: "10～20%" },
+                { v: 0,  c: "#5C3D26", l: "0～10%" }
+            ],
+            pressure: [
+                { v: 1030, c: "#991b1b", l: "1030hPa～" },
+                { v: 1025, c: "#ef4444", l: "1025～1030" },
+                { v: 1020, c: "#f97316", l: "1020～1025" },
+                { v: 1015, c: "#fb923c", l: "1015～1020" },
+                { v: 1010, c: "#fcd34d", l: "1010～1015" },
+                { v: 1005, c: "#fde047", l: "1005～1010" },
+                { v: 1000, c: "#93c5fd", l: "1000～1005" },
+                { v: 995,  c: "#3b82f6", l: "995～1000" },
+                { v: 990,  c: "#2563eb", l: "990～995" },
+                { v: 985,  c: "#1d4ed8", l: "985～990" },
+                { v: 0,    c: "#1e3a8a", l: "～985hPa" }
+            ],
+            normalPressure: [
+                { v: 1030, c: "#991b1b", l: "1030hPa～" },
+                { v: 1025, c: "#ef4444", l: "1025～1030" },
+                { v: 1020, c: "#f97316", l: "1020～1025" },
+                { v: 1015, c: "#fb923c", l: "1015～1020" },
+                { v: 1010, c: "#fcd34d", l: "1010～1015" },
+                { v: 1005, c: "#fde047", l: "1005～1010" },
+                { v: 1000, c: "#93c5fd", l: "1000～1005" },
+                { v: 995,  c: "#3b82f6", l: "995～1000" },
+                { v: 990,  c: "#2563eb", l: "990～995" },
+                { v: 985,  c: "#1d4ed8", l: "985～990" },
+                { v: 0,    c: "#1e3a8a", l: "～985hPa" }
+            ],
+            snow: SNOW_COLORS,
+            snow1h: SNOW_COLORS,
+            snow6h: SNOW_COLORS,
+            snow12h: SNOW_COLORS,
+            snow24h: SNOW_COLORS,
+            sun10m: [
+                { v: 10, c: "#ef4444", l: "10分間" },
+                { v: 7,  c: "#f97316", l: "7～9分" },
+                { v: 4,  c: "#eab308", l: "4～6分" },
+                { v: 1,  c: "#fde047", l: "1～3分" },
+                { v: 0,  c: "#cbd5e1", l: "なし" }
+            ],
+            sun1h: [
+                { v: 1.0, c: "#ef4444", l: "1.0時間" },
+                { v: 0.7, c: "#f97316", l: "0.7～0.9" },
+                { v: 0.4, c: "#eab308", l: "0.4～0.6" },
+                { v: 0.1, c: "#fde047", l: "0.1～0.3" },
+                { v: 0,   c: "#cbd5e1", l: "なし" }
+            ],
+            radar: RADAR_COLORS
+        };
+
+        const WIND_DIRS = ["静穏", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東", "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西", "北"];
+
+        const tabItems = [
+            {id: 'temp', label: '気温'},
+            {id: 'precipitation1h', label: '降水'},
+            {id: 'wind', label: '風向・風速'},
+            {id: 'humidity', label: '湿度'},
+            {id: 'pressure', label: '気圧'},
+            {id: 'sun1h', label: '日照'},
+            {id: 'snow', label: '積雪'}
+        ];
+
+        function getModeTitle(mode) {
+            return elements[mode] ? `${elements[mode].name} (${elements[mode].unit})` : mode;
+        }
+
+        function parseJmaApiData(rawData) {
+            const parsedAmedas = {};
+            Object.keys(rawData).forEach(id => {
+                const obs = rawData[id];
+                if (!stationTable[id]) stationTable[id] = { kjName: "不明", lat: [0,0], lon: [0,0], alt: 0 };
+                const getVal = (arr) => (arr && arr[0] !== null && arr[0] !== undefined) ? [arr[0], arr[1], null] : [null, 0, null];
+                
+                let maxT = [null, 0, null];
+                if (obs.maxTemp && obs.maxTemp[0] !== null) {
+                    let timeStr = "--:--";
+                    if (obs.maxTempTime && obs.maxTempTime.hour !== undefined) {
+                        let h = obs.maxTempTime.hour + 9;
+                        if (h >= 24) h -= 24;
+                        timeStr = `${String(h).padStart(2, '0')}:${String(obs.maxTempTime.minute).padStart(2, '0')}`;
+                    }
+                    maxT = [obs.maxTemp[0], obs.maxTemp[1] || 0, timeStr];
+                }
+
+                let minT = [null, 0, null];
+                if (obs.minTemp && obs.minTemp[0] !== null) {
+                    let timeStr = "--:--";
+                    if (obs.minTempTime && obs.minTempTime.hour !== undefined) {
+                        let h = obs.minTempTime.hour + 9;
+                        if (h >= 24) h -= 24;
+                        timeStr = `${String(h).padStart(2, '0')}:${String(obs.minTempTime.minute).padStart(2, '0')}`;
+                    }
+                    minT = [obs.minTemp[0], obs.minTemp[1] || 0, timeStr];
+                }
+
+                parsedAmedas[id] = {
+                    temp: getVal(obs.temp),
+                    maxtemp: maxT, 
+                    mintemp: minT,
+                    humidity: getVal(obs.humidity),
+                    precipitation10m: getVal(obs.precipitation10m),
+                    precipitation1h: getVal(obs.precipitation1h),
+                    precipitation3h: getVal(obs.precipitation3h),
+                    precipitation24h: getVal(obs.precipitation24h),
+                    wind: getVal(obs.wind),
+                    windDirection: getVal(obs.windDirection),
+                    pressure: getVal(obs.pressure),
+                    normalPressure: getVal(obs.normalPressure),
+                    sun10m: getVal(obs.sun10m),
+                    sun1h: getVal(obs.sun1h),
+                    snow: getVal(obs.snow),
+                    snow1h: getVal(obs.snow1h),
+                    snow6h: getVal(obs.snow6h),
+                    snow12h: getVal(obs.snow12h),
+                    snow24h: getVal(obs.snow24h)
+                };
+            });
+            return parsedAmedas;
+        }
+
+        function formatJmaTimeForMap(date) { 
+            const jstTime = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+            const f = (d) => d.toString().padStart(2, '0'); 
+            const year = jstTime.getUTCFullYear();
+            const month = f(jstTime.getUTCMonth() + 1);
+            const day = f(jstTime.getUTCDate());
+            const hour = f(jstTime.getUTCHours());
+            const min = f(Math.floor(jstTime.getUTCMinutes() / 10) * 10);
+            return `${year}${month}${day}${hour}${min}00`; 
+        }
+
+        function getPrefByStationId(stationId) {
+            const prefix = String(stationId).substring(0, 2);
+            const meta = stationTable[stationId];
+            if (meta && meta.lat) {
+                const lat = meta.lat[0] + meta.lat[1]/60;
+                if (prefix === "44" && lat < 35.0) return "伊豆・小笠原";
+                if (prefix === "88" && lat < 30.0) return "奄美地方";
+            }
+            return PREF_MAP[prefix] || "その他";
+        }
+
+        function getWindDirectionText(dirIdx) {
+            if (dirIdx === null || dirIdx === undefined) return "--";
+            return WIND_DIRS[dirIdx] || "--";
+        }
+
+        function showMaxTempRanking() {
+            document.getElementById('modeSelector').value = 'maxtemp';
+            document.getElementById('areaSelector').value = 'all';
+            switchMode('maxtemp');
+            onAreaChange('all');
+            if (window.innerWidth < 768 && !isSidebarOpen) toggleSidebarViaButton();
+        }
+
+        const windDirectionPlugin = {
+            id: 'windDirection',
+            afterDatasetsDraw(chart) {
+                if (chart.config.data.datasets[0].label !== getModeTitle('wind')) return;
+                const ctx = chart.ctx;
+                const meta = chart.getDatasetMeta(0);
+                const windDirs = chart.config.data.windDirs;
+                if (!windDirs) return;
+                
+                const chartArea = chart.chartArea;
+                const y = chartArea.top - 18; 
+                let visibleCount = 0;
+                meta.data.forEach(el => { if (el.x >= chartArea.left && el.x <= chartArea.right) visibleCount++; });
+                
+                let step = 1;
+                if (visibleCount > 0) {
+                    const pxPerData = (chartArea.right - chartArea.left) / visibleCount;
+                    if (pxPerData < 20) step = Math.ceil(20 / pxPerData);
+                }
+                
+                ctx.save();
+                meta.data.forEach((element, index) => {
+                    const dirIdx = windDirs[index];
+                    if (dirIdx === null || dirIdx === undefined) return;
+                    const x = element.x;
+                    if (x < chartArea.left || x > chartArea.right) return;
+                    const isLatest = (index === meta.data.length - 1);
+                    if (index % step !== 0 && !isLatest) return;
+                    
+                    if (dirIdx === 0) {
+                        ctx.fillStyle = '#94a3b8';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.font = 'bold 10px "Noto Sans JP"';
+                        ctx.fillText('◎', x, y);
+                    } else {
+                        const angle = dirIdx * 22.5 + 180;
+                        let color = chart.data.datasets[0].pointBackgroundColor ? chart.data.datasets[0].pointBackgroundColor[index] : '#2563eb';
+                        if (!color || typeof color !== 'string') color = '#2563eb';
+                        
+                        ctx.save();
+                        ctx.translate(x, y);
+                        ctx.rotate(angle * Math.PI / 180);
+                        const scale = 0.55; 
+                        ctx.scale(scale, scale);
+                        ctx.translate(-12, -12); 
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(12, 2);
+                        ctx.lineTo(4.5, 20.29);
+                        ctx.lineTo(5.21, 21.0);
+                        ctx.lineTo(12, 18);
+                        ctx.lineTo(18.79, 21.0);
+                        ctx.lineTo(19.5, 20.29);
+                        ctx.closePath();
+                        
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                        ctx.lineWidth = 2.5;
+                        ctx.strokeStyle = 'white';
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                });
+                ctx.restore();
+            }
+        };
+
+        const extremeLinesPlugin = {
+            id: 'extremeLines',
+            beforeDatasetsDraw(chart) {
+                const { ctx, chartArea, scales: { x } } = chart;
+                const labels = chart.config.data.labels;
+                const lines = chart.config.data.extremeLines;
+                
+                ctx.save();
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.strokeStyle = 'rgba(15, 23, 42, 0.4)';
+                
+                labels.forEach((label, idx) => {
+                    if (label.endsWith(' 0:00')) {
+                        const xPos = x.getPixelForValue(idx);
+                        if (xPos >= chartArea.left && xPos <= chartArea.right) {
+                            ctx.beginPath();
+                            ctx.moveTo(xPos, chartArea.top);
+                            ctx.lineTo(xPos, chartArea.bottom);
+                            ctx.stroke();
+                        }
+                    }
+                });
+
+                if (lines && Array.isArray(lines)) {
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([5, 5]);
+                    lines.forEach(line => {
+                        if (line.index >= 0) {
+                            const xPos = x.getPixelForValue(line.index);
+                            if (xPos >= chartArea.left && xPos <= chartArea.right) {
+                                ctx.beginPath();
+                                ctx.strokeStyle = line.type === 'max' ? 'rgba(239, 68, 68, 0.8)' : 'rgba(59, 130, 246, 0.8)';
+                                ctx.moveTo(xPos, chartArea.top);
+                                ctx.lineTo(xPos, chartArea.bottom);
+                                ctx.stroke();
+                            }
+                        }
+                    });
+                }
+                ctx.restore();
+            }
+        };
+
+        function toggleLegend() {
+            isLegendCollapsed = !isLegendCollapsed;
+            const legendEl = document.getElementById('mapLegend');
+            const iconEl = document.getElementById('legend-toggle-icon');
+            if (isLegendCollapsed) {
+                legendEl.classList.add('collapsed-legend');
+                iconEl.setAttribute('data-lucide', 'chevron-up');
+            } else {
+                legendEl.classList.remove('collapsed-legend');
+                iconEl.setAttribute('data-lucide', 'chevron-down');
+            }
+            lucide.createIcons();
+        }
+
+        let currentPercent = 0;
+        function setProgressRaw(percent) {
+            currentPercent = percent;
+            const textEl = document.getElementById('progress-text');
+            const circleEl = document.getElementById('progress-circle');
+            if (textEl) textEl.innerText = percent + '%';
+            if (circleEl) circleEl.style.strokeDashoffset = 414.69 - (414.69 * percent / 100);
+        }
+
+        async function fetchAllExactExtremes() {
+            const allIds = Object.keys(amedasData);
+            const total = allIds.length;
+            let doneCount = 0;
+            const batchSize = 30; // 30件ずつ一気に取得
+
+            const baseTime = selectedDate ? new Date(selectedDate) : new Date();
+            const jstTime = new Date(baseTime.getTime() + 9 * 60 * 60 * 1000);
+            const yyyy = jstTime.getUTCFullYear();
+            const mm = String(jstTime.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(jstTime.getUTCDate()).padStart(2, '0');
+            const blockHour = Math.floor(jstTime.getUTCHours() / 3) * 3;
+            const hh = String(blockHour).padStart(2, '0');
+
+            for (let i = 0; i < total; i += batchSize) {
+                const batchIds = allIds.slice(i, i + batchSize);
+                await Promise.all(batchIds.map(async (id) => {
+                    const url = `https://www.jma.go.jp/bosai/amedas/data/point/${id}/${yyyy}${mm}${dd}_${hh}.json`;
+                    try {
+                        const res = await fetch(url);
+                        if (res.ok) {
+                            const data = await res.json();
+                            const sortedKeys = Object.keys(data).sort();
+                            let exactMax = null;
+                            let exactMin = null;
+
+                            for (let j = sortedKeys.length - 1; j >= 0; j--) {
+                                const obs = data[sortedKeys[j]];
+                                if (!exactMax && obs.maxTemp && obs.maxTemp[0] !== null) {
+                                    let timeStr = "--:--";
+                                    if (obs.maxTempTime && obs.maxTempTime.hour !== undefined) {
+                                        let h = obs.maxTempTime.hour + 9;
+                                        if (h >= 24) h -= 24;
+                                        timeStr = `${String(h).padStart(2, '0')}:${String(obs.maxTempTime.minute).padStart(2, '0')}`;
+                                    }
+                                    exactMax = [obs.maxTemp[0], obs.maxTemp[1] || 0, timeStr];
+                                }
+                                if (!exactMin && obs.minTemp && obs.minTemp[0] !== null) {
+                                    let timeStr = "--:--";
+                                    if (obs.minTempTime && obs.minTempTime.hour !== undefined) {
+                                        let h = obs.minTempTime.hour + 9;
+                                        if (h >= 24) h -= 24;
+                                        timeStr = `${String(h).padStart(2, '0')}:${String(obs.minTempTime.minute).padStart(2, '0')}`;
+                                    }
+                                    exactMin = [obs.minTemp[0], obs.minTemp[1] || 0, timeStr];
+                                }
+                                if (exactMax && exactMin) break;
+                            }
+                            // amedasDataに完璧な極値を直接書き込む
+                            if (amedasData[id]) {
+                                if (exactMax) amedasData[id].maxtemp = exactMax;
+                                if (exactMin) amedasData[id].mintemp = exactMin;
+                            }
+                        }
+                    } catch (e) {
+                        // ignore fetching errors to keep the process running
+                    }
+                }));
+                doneCount += batchIds.length;
+                setProgressRaw(65 + Math.floor((doneCount / total) * 25)); // 65% ~ 90%
+            }
+        }
+
+        async function init() {
+            lucide.createIcons();
+            initMap();
+            updateLegend();
+            
+            try {
+                setProgressRaw(10);
+                const geoRes = await fetch('https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson');
+                const geoData = await geoRes.json();
+                L.geoJson(geoData, { style: { fillColor: "#ffffff", weight: 1.5, opacity: 1, color: "#cbd5e1", fillOpacity: 1 } }).addTo(map);
+
+                setProgressRaw(30);
+                const tableRes = await fetch('https://www.jma.go.jp/bosai/amedas/const/amedastable.json');
+                if(tableRes.ok) stationTable = await tableRes.json();
+
+                setProgressRaw(50);
+                await loadLatestMapData(); 
+
+                setProgressRaw(65);
+                const subtext = document.getElementById('loading-subtext');
+                if(subtext) subtext.innerText = "全国の最高気温データを取得中...\n(通信環境により数十秒かかります)";
+                
+                // ここで全国1300件の正確な極値をすべて取得しきるまで待つ！
+                await fetchAllExactExtremes();
+
+                setProgressRaw(90);
+                const radarTimeRes = await fetch('https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json');
+                if(radarTimeRes.ok){
+                    const radarTimes = await radarTimeRes.json();
+                    latestRadarTime = radarTimes[0];
+                }
+
+                buildTimeSteps();
+                
+                renderMarkers();
+                renderStationList();
+                updateLegend();
+
+                setProgressRaw(100);
+                setTimeout(() => {
+                    const el = document.getElementById('loading');
+                    if (el) { el.style.opacity = '0'; setTimeout(() => el.style.display = 'none', 600); }
+                }, 800);
+            } catch (error) {
+                console.error(error);
+                const el = document.getElementById('loading');
+                if (el) el.innerHTML = `<div class="text-center p-10 flex flex-col items-center"><div class="bg-red-50 p-6 rounded-3xl mb-6"><p class="text-red-500 font-black">通信エラー</p></div><button onclick="location.reload()" class="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black">再読み込み</button></div>`;
+            }
+        }
+
+        function buildTimeSteps() {
+            if (!selectedDate) return;
+            timeSteps = [];
+            const baseTime = new Date(selectedDate.getTime());
+            for (let i = 144; i >= 0; i--) {
+                const target = new Date(baseTime.getTime() - i * 10 * 60 * 1000);
+                timeSteps.push(target);
+            }
+            currentStepIndex = 144;
+            updateSliderUI();
+        }
+
+        function updateSliderUI() {
+            const slider = document.getElementById('timeRangeSlider');
+            const timeDisplay = document.getElementById('sliderTimeDisplay');
+            const stepDisplay = document.getElementById('sliderStepDisplay');
+            
+            if (slider) { slider.max = timeSteps.length - 1; slider.value = currentStepIndex; }
+            
+            if (timeSteps[currentStepIndex]) {
+                const d = timeSteps[currentStepIndex];
+                const month = d.getMonth() + 1;
+                const date = d.getDate();
+                const hours = d.getHours();
+                const mins = String(d.getMinutes()).padStart(2, '0');
+                if (timeDisplay) timeDisplay.innerText = `${month}月${date}日 ${hours}:${mins} 観測時点`;
+            }
+            
+            if (stepDisplay) {
+                if (currentStepIndex === timeSteps.length - 1) {
+                    stepDisplay.classList.add('opacity-40', 'pointer-events-none');
+                    stepDisplay.classList.remove('bg-blue-50', 'text-blue-600', 'border-blue-200');
+                    stepDisplay.classList.add('bg-slate-50', 'text-slate-400', 'border-slate-200');
+                } else {
+                    stepDisplay.classList.remove('opacity-40', 'pointer-events-none');
+                    stepDisplay.classList.add('bg-blue-50', 'text-blue-600', 'border-blue-200');
+                    stepDisplay.classList.remove('bg-slate-50', 'text-slate-400', 'border-slate-200');
+                }
+            }
+        }
+
+        function jumpToLatest() {
+            if (isPlaying) togglePlayTime(); 
+            loadMapDataForStep(timeSteps.length - 1);
+        }
+
+        async function loadMapDataForStep(index) {
+            if (index < 0 || index >= timeSteps.length) return;
+            currentStepIndex = index;
+            updateSliderUI();
+            
+            const targetDate = timeSteps[index];
+            const timePath = formatJmaTimeForMap(targetDate);
+            
+            let data = null;
+            if (amedasDataCache[timePath]) {
+                data = amedasDataCache[timePath];
+            } else {
+                try {
+                    const url = `https://www.jma.go.jp/bosai/amedas/data/map/${timePath}.json`;
+                    const dataRes = await fetch(url);
+                    if (dataRes.ok) {
+                        const rawData = await dataRes.json();
+                        data = parseJmaApiData(rawData);
+                        amedasDataCache[timePath] = data; 
+                    }
+                } catch (e) { console.error("Step data load failed", e); }
+            }
+            
+            if (data) {
+                amedasData = data;
+                
+                // 過去スライダー移動時も、現在保持している極値データを維持する
+                const latestTimePath = formatJmaTimeForMap(selectedDate);
+                const latestData = amedasDataCache[latestTimePath];
+                if (latestData) {
+                    Object.keys(amedasData).forEach(id => {
+                        if (latestData[id]) {
+                            amedasData[id].maxtemp = latestData[id].maxtemp;
+                            amedasData[id].mintemp = latestData[id].mintemp;
+                        }
+                    });
+                }
+                
+                const timeEl = document.getElementById('obsTime');
+                if (timeEl) {
+                    const m = targetDate.getMonth() + 1;
+                    const d = targetDate.getDate();
+                    const h = targetDate.getHours();
+                    const min = String(targetDate.getMinutes()).padStart(2, '0');
+                    timeEl.innerText = `${m}/${d} ${h}:${min} 観測`;
+                }
+
+                renderMarkers();
+                renderStationList(); // スライダー閲覧時は過去の最新として表示（自動取得は行わない）
+                if (isTableModeActive) refreshTableData();
+            }
+        }
+
+        function togglePlayTime() {
+            const btn = document.getElementById('playBtn');
+            isPlaying = !isPlaying;
+            
+            if (isPlaying) {
+                if (btn) btn.innerHTML = '<i data-lucide="pause" class="w-4 h-4 fill-current"></i>';
+                if (currentStepIndex === timeSteps.length - 1) currentStepIndex = 0;
+                playTimer = setInterval(() => {
+                    let nextStep = currentStepIndex + 1;
+                    if (nextStep >= timeSteps.length) {
+                        nextStep = timeSteps.length - 1;
+                        togglePlayTime(); 
+                    } else {
+                        loadMapDataForStep(nextStep);
+                    }
+                }, 1000);
+            } else {
+                if (btn) btn.innerHTML = '<i data-lucide="play" class="w-4 h-4 fill-current"></i>';
+                clearInterval(playTimer);
+                playTimer = null;
+            }
+            lucide.createIcons();
+        }
+
+        function onSliderInput(val) {
+            if (isPlaying) togglePlayTime(); 
+            loadMapDataForStep(parseInt(val, 10));
+        }
+
+        async function loadLatestMapData() {
+            try {
+                const latestTimeRes = await fetch('https://www.jma.go.jp/bosai/amedas/data/latest_time.txt');
+                const latestTimeStr = await latestTimeRes.text();
+                selectedDate = new Date(latestTimeStr.trim());
+
+                let dataSuccess = false;
+                let target = new Date(selectedDate.getTime());
+
+                for (let attempt = 0; attempt < 6; attempt++) {
+                    try {
+                        const timePath = formatJmaTimeForMap(target);
+                        const url = `https://www.jma.go.jp/bosai/amedas/data/map/${timePath}.json`;
+                        
+                        const dataRes = await fetch(url);
+                        if (!dataRes.ok) throw new Error("File not found");
+                        const rawData = await dataRes.json();
+                        
+                        amedasData = parseJmaApiData(rawData);
+                        amedasDataCache[timePath] = amedasData;
+                        dataSuccess = true;
+                        selectedDate = target; 
+                        break;
+                    } catch (e) { target.setMinutes(target.getMinutes() - 10); }
+                }
+
+                if (dataSuccess) {
+                    const timeEl = document.getElementById('obsTime');
+                    const m = (selectedDate.getMonth() + 1);
+                    const d = selectedDate.getDate();
+                    const h = selectedDate.getHours();
+                    const min = String(selectedDate.getMinutes()).padStart(2, '0');
+                    if (timeEl) timeEl.innerText = `${m}/${d} ${h}:${min} 観測`;
+                    
+                    // 初期化時は fetchAllExactExtremes が後に走るのでここでは描画しない
+                    if (currentPercent >= 100) {
+                        renderMarkers();
+                        renderStationList();
+                        updateLegend();
+                    }
+                }
+            } catch (e) { console.error("Latest time failed", e); }
+        }
+
+        async function fetchStationTimeSeries(stationId) {
+            if (allStationsTimeSeries[stationId] && Object.keys(allStationsTimeSeries[stationId]).length > 0) {
+                return allStationsTimeSeries[stationId]; 
+            }
+
+            const stationData = {};
+            const fetchPromises = [];
+            const baseTime = selectedDate ? new Date(selectedDate) : new Date(); 
+            
+            for (let i = 0; i <= 17; i++) {
+                const targetTime = new Date(baseTime.getTime() - i * 3 * 60 * 60 * 1000);
+                const jstTime = new Date(targetTime.getTime() + 9 * 60 * 60 * 1000);
+                
+                const yyyy = jstTime.getUTCFullYear();
+                const mm = String(jstTime.getUTCMonth() + 1).padStart(2, '0');
+                const dd = String(jstTime.getUTCDate()).padStart(2, '0');
+                
+                const blockHour = Math.floor(jstTime.getUTCHours() / 3) * 3;
+                const hh = String(blockHour).padStart(2, '0');
+                
+                const url = `https://www.jma.go.jp/bosai/amedas/data/point/${stationId}/${yyyy}${mm}${dd}_${hh}.json`;
+                
+                fetchPromises.push(
+                    fetch(url).then(res => res.ok ? res.json() : null).catch(() => null)
+                );
+            }
+            
+            const results = await Promise.all(fetchPromises);
+            results.forEach(res => {
+                if (res) Object.assign(stationData, res);
+            });
+            
+            let exactMax = null;
+            let exactMin = null;
+            const sortedKeys = Object.keys(stationData).sort();
+            
+            for (let i = sortedKeys.length - 1; i >= 0; i--) {
+                const key = sortedKeys[i];
+                const obs = stationData[key];
+                
+                if (!exactMax && obs.maxTemp && obs.maxTemp[0] !== null) {
+                    let timeStr = "--:--";
+                    if (obs.maxTempTime && obs.maxTempTime.hour !== undefined) {
+                        let h = obs.maxTempTime.hour + 9;
+                        if (h >= 24) h -= 24;
+                        timeStr = `${String(h).padStart(2, '0')}:${String(obs.maxTempTime.minute).padStart(2, '0')}`;
+                    }
+                    exactMax = [obs.maxTemp[0], obs.maxTemp[1] || 0, timeStr];
+                }
+                
+                if (!exactMin && obs.minTemp && obs.minTemp[0] !== null) {
+                    let timeStr = "--:--";
+                    if (obs.minTempTime && obs.minTempTime.hour !== undefined) {
+                        let h = obs.minTempTime.hour + 9;
+                        if (h >= 24) h -= 24;
+                        timeStr = `${String(h).padStart(2, '0')}:${String(obs.minTempTime.minute).padStart(2, '0')}`;
+                    }
+                    exactMin = [obs.minTemp[0], obs.minTemp[1] || 0, timeStr];
+                }
+                
+                if (exactMax && exactMin) break;
+            }
+
+            if (amedasData[stationId]) {
+                if (exactMax) amedasData[stationId].maxtemp = exactMax;
+                if (exactMin) amedasData[stationId].mintemp = exactMin;
+            }
+
+            allStationsTimeSeries[stationId] = stationData;
+            if (stationId === currentStationId) currentStationData = stationData;
+            
+            return stationData;
+        }
+
+        async function renderChart(stationId, mode) {
+            const chartContainer = document.getElementById('chartContainer');
+            if (!chartContainer) return;
+            
+            chartContainer.innerHTML = '<div class="flex justify-center items-center h-full"><p class="text-[10px] font-bold text-slate-400 animate-pulse uppercase tracking-widest italic">グラフデータを取得中...</p></div>';
+
+            const tsData = await fetchStationTimeSeries(stationId);
+            
+            chartContainer.innerHTML = '<canvas id="stationChart"></canvas>';
+            const canvas = document.getElementById('stationChart');
+            const ctx = canvas.getContext('2d');
+
+            const labels = [];
+            const dataPoints = [];
+            const windDirs = [];
+            const dailyExtremes = {};
+
+            const sortedKeys = Object.keys(tsData).sort();
+            const baseTime = selectedDate ? new Date(selectedDate) : new Date();
+            const twoDaysAgo = new Date(baseTime.getTime() - 48 * 60 * 60 * 1000);
+            const twoDaysAgoStr = formatJmaTimeForMap(twoDaysAgo); 
+            const jstToday = new Date(baseTime.getTime() + 9 * 60 * 60 * 1000);
+            const todayStr = String(jstToday.getUTCDate()).padStart(2, '0');
+
+            sortedKeys.forEach(key => {
+                if (key >= twoDaysAgoStr) {
+                    const dStr = key.substring(6, 8);
+                    const minStr = key.substring(10, 12);
+                    if (currentGraphInterval === 60 && minStr !== '00') return;
+
+                    const obs = tsData[key];
+                    let val = null;
+                    let dataKey = mode;
+                    if (mode.startsWith('precipitation')) dataKey = 'precipitation1h';
+                    if (mode === 'maxtemp' || mode === 'mintemp') dataKey = 'temp';
+                    
+                    if (obs[dataKey] && obs[dataKey][0] !== null) val = obs[dataKey][0];
+                    else val = 0; 
+
+                    if (mode === 'wind') windDirs.push(obs.windDirection ? obs.windDirection[0] : null);
+                    else windDirs.push(null);
+
+                    const m = key.substring(4, 6);
+                    const d = key.substring(6, 8);
+                    const h = Number(key.substring(8, 10));
+                    const timeLabel = `${Number(m)}/${Number(d)} ${h}:${minStr}`;
+                    labels.push(timeLabel);
+                    dataPoints.push(val);
+
+                    if (!dailyExtremes[dStr]) dailyExtremes[dStr] = { max: -99999, min: 99999, maxTime: "", minTime: "" };
+                    if (val !== null) {
+                        if (val > dailyExtremes[dStr].max) { dailyExtremes[dStr].max = val; dailyExtremes[dStr].maxTime = timeLabel; }
+                        if (val < dailyExtremes[dStr].min) { dailyExtremes[dStr].min = val; dailyExtremes[dStr].minTime = timeLabel; }
+                    }
+                }
+            });
+            
+            const extremesEl = document.getElementById('dailyExtremes');
+            const currentStData = amedasData[stationId] || {};
+            
+            let calcMax = currentStData.maxtemp?.[0] ?? null;
+            let calcMaxTime = currentStData.maxtemp?.[2] ?? null;
+            let calcMin = currentStData.mintemp?.[0] ?? null;
+            let calcMinTime = currentStData.mintemp?.[2] ?? null;
+            
+            const todayExt = dailyExtremes[todayStr];
+            let todayMax = todayExt ? todayExt.max : -99999;
+            let todayMin = todayExt ? todayExt.min : 99999;
+            let todayMaxTime = todayExt ? todayExt.maxTime : "";
+            let todayMinTime = todayExt ? todayExt.minTime : "";
+
+            if (extremesEl && (calcMax !== null || todayMax !== -99999)) {
+                let maxLabel = '今日の最高';
+                let minLabel = '今日の最低';
+                let unit = elements[mode]?.unit || '';
+                
+                let dispMax = todayMax !== -99999 ? todayMax : null;
+                let dispMaxTime = todayMaxTime;
+                let dispMin = todayMin !== 99999 ? todayMin : null;
+                let dispMinTime = todayMinTime;
+
+                if (mode === 'temp' || mode === 'maxtemp' || mode === 'mintemp') { 
+                    maxLabel = '最高気温'; 
+                    minLabel = '最低気温'; 
+                    dispMax = calcMax;
+                    dispMaxTime = calcMaxTime;
+                    dispMin = calcMin;
+                    dispMinTime = calcMinTime;
+                }
+                
+                if (dispMax !== null) {
+                    let extHtml = `<div class="flex flex-wrap gap-2 items-center justify-center">`;
+                    extHtml += `
+                        <div class="flex items-center gap-1.5 bg-orange-50 px-3 py-1.5 rounded-xl border border-orange-200/60 shadow-sm">
+                            <span class="text-[9px] font-black text-orange-500">${maxLabel}</span>
+                            <span class="text-sm font-black text-orange-600">${dispMax.toFixed(1)}${unit}</span>
+                            <span class="text-[10px] font-bold text-orange-400">(${dispMaxTime || '--:--'})</span>
+                        </div>
+                    `;
+                    if (['temp', 'maxtemp', 'mintemp', 'pressure', 'normalPressure', 'humidity'].includes(mode)) {
+                        extHtml += `
+                            <div class="flex items-center gap-1.5 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200/60 shadow-sm">
+                                <span class="text-[9px] font-black text-blue-500">${minLabel}</span>
+                                <span class="text-sm font-black text-blue-600">${dispMin !== null ? dispMin.toFixed(1) : 'ーー'}${unit}</span>
+                                <span class="text-[10px] font-bold text-blue-400">(${dispMinTime || '--:--'})</span>
+                            </div>
+                        `;
+                    }
+                    extHtml += `</div>`;
+                    extremesEl.innerHTML = extHtml;
+                    extremesEl.classList.remove('hidden');
+                } else {
+                    extremesEl.classList.add('hidden');
+                }
+            } else if (extremesEl) {
+                extremesEl.classList.add('hidden');
+            }
+
+            const bgColors = dataPoints.map(val => getColorForValue(val, mode));
+            const isLineChart = ['temp', 'maxtemp', 'mintemp', 'humidity', 'pressure', 'normalPressure', 'wind'].includes(mode);
+            const chartType = isLineChart ? 'line' : 'bar';
+            
+            const datasetConfig = {
+                label: getModeTitle(mode),
+                data: dataPoints,
+                type: chartType,
+                backgroundColor: bgColors,
+                borderRadius: isLineChart ? 0 : 4,
+                borderSkipped: false
+            };
+
+            if (isLineChart) {
+                datasetConfig.borderWidth = 2.5;
+                datasetConfig.tension = 0.4;
+                datasetConfig.pointRadius = 0;
+                datasetConfig.pointHoverRadius = 0;
+                datasetConfig.fill = 'origin';
+                datasetConfig.segment = {
+                    borderColor: ctx => getColorForValue(ctx.p1.raw, mode),
+                    backgroundColor: ctx => hexToRgba(getColorForValue(ctx.p1.raw, mode), 0.25)
+                };
+            }
+
+            if (currentChart) currentChart.destroy();
+
+            const extremeLines = [];
+            Object.keys(dailyExtremes).forEach(dStr => {
+                const ext = dailyExtremes[dStr];
+                if (ext.max !== -99999) {
+                    const maxIdx = labels.indexOf(ext.maxTime);
+                    if (maxIdx >= 0) extremeLines.push({ index: maxIdx, type: 'max' });
+                }
+                if (ext.min !== 99999 && ['temp', 'maxtemp', 'mintemp', 'pressure', 'normalPressure', 'humidity'].includes(mode)) {
+                    const minIdx = labels.indexOf(ext.minTime);
+                    if (minIdx >= 0) extremeLines.push({ index: minIdx, type: 'min' });
+                }
+            });
+
+            currentChart = new Chart(ctx, {
+                type: chartType,
+                data: { labels: labels, windDirs: windDirs, extremeLines: extremeLines, datasets: [datasetConfig] },
+                plugins: [windDirectionPlugin, extremeLinesPlugin],
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: { padding: { top: (mode === 'wind') ? 35 : 10 } },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.9)', titleFont: { family: 'Noto Sans JP', size: 10 }, bodyFont: { family: 'Noto Sans JP', size: 12, weight: 'bold' }, padding: 10, displayColors: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    let value = context.parsed.y;
+                                    if (mode === 'wind') {
+                                        const dirIdx = context.dataset.windDirs?.[context.dataIndex];
+                                        return `風向・風速: ${getWindDirectionText(dirIdx)} ${value.toFixed(1)} m/s`;
+                                    }
+                                    return `${label}: ${value.toFixed(1)} ${elements[mode]?.unit || ''}`;
+                                }
+                            }
+                        },
+                        zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: false }, pinch: { enabled: true }, mode: 'x' } }
+                    },
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                autoSkip: true, maxTicksLimit: 12, maxRotation: 0, minRotation: 0, font: { family: 'Noto Sans JP', size: 9 }, color: '#94a3b8',
+                                callback: function(value, index) {
+                                    const label = this.getLabelForValue(value);
+                                    if (!label) return null;
+                                    const parts = label.split(' ');
+                                    if (parts.length < 2) return label;
+                                    const timePart = parts[1];
+                                    const [hStr, mStr] = timePart.split(':');
+                                    const h = parseInt(hStr, 10);
+                                    const m = parseInt(mStr, 10);
+                                    const visibleRange = this.max - this.min;
+                                    
+                                    if (visibleRange <= 36) return label;
+                                    else if (visibleRange <= 100) return m === 0 ? timePart : null;
+                                    else return (h % 3 === 0 && m === 0) ? (h === 0 ? label : timePart) : null;
+                                }
+                            }
+                        },
+                        y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { family: 'Noto Sans JP', size: 10 }, color: '#64748b' } }
+                    }
+                }
+            });
+
+            canvas.addEventListener('wheel', (e) => {
+                if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+                    e.preventDefault();
+                    if (currentChart) currentChart.pan({x: -e.deltaX});
+                }
+            }, { passive: false });
+        }
+
+        function openGraphModal(id) {
+            const meta = stationTable[id];
+            document.getElementById('graphModalTitle').innerText = meta.kjName;
+            const modal = document.getElementById('graphModal');
+            const content = document.getElementById('graphModalContent');
+            modal && modal.classList.remove('opacity-0', 'pointer-events-none');
+            content.classList.remove('scale-95');
+            content.classList.add('scale-100');
+            updateGraphTabs();
+            renderChart(id, currentMode);
+        }
+
+        function closeGraphModal() {
+            const modal = document.getElementById('graphModal');
+            const content = document.getElementById('graphModalContent');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+        }
+
+        function openRawDataModal(id) {
+            const meta = stationTable[id];
+            const currentData = amedasData[id] || {};
+            const timeSeries = allStationsTimeSeries[id] ? allStationsTimeSeries[id] : "(グラフを開くと時系列データが同期されます)";
+
+            document.getElementById('rawDataModalTitle').innerText = `${meta ? meta.kjName : id} 生データ (RAW)`;
+            
+            const displayObj = {
+                station_id: id,
+                meta_data: meta,
+                latest_observation: currentData,
+                time_series_48h: timeSeries
+            };
+
+            document.getElementById('rawJsonCode').innerText = JSON.stringify(displayObj, null, 2);
+            const modal = document.getElementById('rawDataModal');
+            const content = document.getElementById('rawDataModalContent');
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            content.classList.remove('scale-95');
+            content.classList.add('scale-100');
+            lucide.createIcons();
+        }
+
+        function closeRawDataModal() {
+            const modal = document.getElementById('rawDataModal');
+            const content = document.getElementById('rawDataModalContent');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+            if (e.key === 'f' || e.key === 'F') { e.preventDefault(); if (currentStationId) openRawDataModal(currentStationId); }
+        });
+
+        function updateGraphTabs() {
+            const tabsContainer = document.getElementById('graphTabs');
+            if (!tabsContainer) return;
+            tabsContainer.innerHTML = tabItems.map(t => `
+                <button onclick="switchMode('${t.id}')" class="px-4 py-2 rounded-xl text-[11px] font-black whitespace-nowrap transition-all border ${currentMode === t.id ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}">${t.label}</button>
+            `).join('');
+        }
+
+        function switchMode(mode) {
+            currentMode = mode;
+            const mainSelector = document.getElementById('modeSelector');
+            const listSelector = document.getElementById('listModeSelector');
+            
+            if (mainSelector && mainSelector.value !== mode) mainSelector.value = mode;
+            if (listSelector && listSelector.value !== mode) listSelector.value = mode;
+            
+            if (mode === 'mintemp') {
+                sortColumn = 'val';
+                sortDirection = 'asc';
+            } else if (mode === 'maxtemp' || mode === 'temp') {
+                sortColumn = 'val';
+                sortDirection = 'desc';
+            }
+
+            renderMarkers(); 
+            renderStationList(); 
+            updateLegend();
+
+            if (isTableModeActive) refreshTableData();
+            
+            const modal = document.getElementById('graphModal');
+            if (modal && !modal.classList.contains('opacity-0') && currentStationId) {
+                updateGraphTabs();
+                renderChart(currentStationId, currentMode);
+            }
+
+            const panel = document.getElementById('detailPanel');
+            if (window.innerWidth < 768 && isSidebarOpen && panel.classList.contains('hidden') && modal.classList.contains('opacity-0')) {
+                toggleSidebarViaButton(); 
+            }
+        }
+
+        function initMap() {
+            map = L.map('map', { zoomSnap: 0.1, attributionControl: false, zoomControl: false }).setView(MAP_CENTER, MAP_ZOOM);
+            map.createPane('radarPane').style.zIndex = 400;
+            map.createPane('stationPane').style.zIndex = 600;
+            map.on('zoomend', () => { if (isRadarOn) updateRadarLayer(); renderMarkers(); });
+        }
+
+        function toggleSidebarViaButton() {
+            isSidebarOpen = !isSidebarOpen;
+            const sidebar = document.getElementById('sidebar');
+            if (isSidebarOpen) sidebar.classList.add('sidebar-open');
+            else sidebar.classList.remove('sidebar-open');
+        }
+
+        function updateLegend() {
+            const container = document.getElementById('legend-items');
+            const titleEl = document.getElementById('legend-title');
+            if (!container) return;
+            
+            titleEl.innerText = elements[currentMode] ? elements[currentMode].name : getModeTitle(currentMode);
+            container.innerHTML = '';
+            
+            const ruleSet = LEGENDS[currentMode] || LEGENDS.temp;
+            ruleSet.forEach(item => {
+                const div = document.createElement('div');
+                div.className = "flex items-center gap-2.5 text-[10px] font-bold text-slate-600";
+                div.innerHTML = `<div class="legend-dot" style="background:${item.c}"></div><span>${item.l}</span>`;
+                container.appendChild(div);
+            });
+
+            if (isRadarOn) {
+                const hr = document.createElement('div');
+                hr.className = "border-t border-slate-200 mt-2 pt-2 text-[8px] font-black text-slate-300 uppercase italic tracking-widest";
+                hr.innerText = "雨雲レーダー";
+                container.appendChild(hr);
+                LEGENDS.radar.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = "flex items-center gap-2.5 text-[10px] font-bold text-slate-600";
+                    div.innerHTML = `<div class="legend-dot" style="background:${item.c}"></div><span>${item.l}</span>`;
+                    container.appendChild(div);
+                });
+            }
+        }
+
+        function updateRadarLayer() {
+            if (!isRadarOn || !latestRadarTime) return;
+            const t = latestRadarTime;
+            const nativeZ = map.getZoom() >= 10 ? 10 : (map.getZoom() >= 8 ? 8 : (map.getZoom() >= 6 ? 6 : 4));
+            const url = `https://www.jma.go.jp/bosai/jmatile/data/nowc/${t.basetime}/none/${t.validtime}/surf/hrpns/{z}/{x}/{y}.png`;
+            if (radarLayer) map.removeLayer(radarLayer);
+            radarLayer = L.tileLayer(url, { opacity: 0.65, pane: 'radarPane', className: 'radar-tiles', keepBuffer: 8, maxNativeZoom: nativeZ }).addTo(map);
+        }
+
+        function toggleTableMode(active) {
+            isTableModeActive = active;
+            const appContainer = document.getElementById('appMainFrame');
+            const toggleBtn = document.getElementById('tableModeToggleBtn');
+            const timeSlider = document.getElementById('timeSliderContainer');
+            
+            if (active) {
+                appContainer.classList.add('table-view-active');
+                if (toggleBtn) toggleBtn.classList.add('bg-blue-600', 'text-white', 'border-blue-500');
+                if (timeSlider) timeSlider.classList.add('hidden');
+                refreshTableData();
+            } else {
+                appContainer.classList.remove('table-view-active');
+                if (toggleBtn) toggleBtn.classList.remove('bg-blue-600', 'text-white', 'border-blue-500');
+                if (timeSlider) timeSlider.classList.remove('hidden');
+            }
+        }
+
+        function renderTableHeader() {
+            const headerRow = document.getElementById('tableHeaderRow');
+            if (!headerRow) return;
+            const unit = elements[currentMode]?.unit || "";
+            const getSortIcon = (col) => {
+                if (sortColumn !== col) return '<i data-lucide="arrow-up-down" class="w-3 h-3 text-slate-300 ml-1 inline"></i>';
+                return sortDirection === 'desc' 
+                    ? '<i data-lucide="chevron-down" class="w-3.5 h-3.5 text-blue-600 font-black inline ml-1"></i>' 
+                    : '<i data-lucide="chevron-up" class="w-3.5 h-3.5 text-blue-600 font-black inline ml-1"></i>';
+            };
+
+            headerRow.innerHTML = `
+                <th class="p-3 text-slate-500 text-[10px] font-black w-[25%] truncate select-none"><span>観測点名</span></th>
+                <th class="p-3 text-slate-500 text-[10px] font-black w-[18%] truncate select-none"><span>都府県/地域</span></th>
+                <th class="p-3 cursor-pointer hover:bg-slate-100 transition-colors select-none text-right w-[18%] truncate" onclick="sortTable('val')">
+                    <div class="flex items-center justify-end">現在値 (${unit}) ${getSortIcon('val')}</div>
+                </th>
+                <th class="p-3 cursor-pointer hover:bg-slate-100 transition-colors select-none text-right w-[20%] truncate" onclick="sortTable('valMax')">
+                    <div class="flex items-center justify-end">最高気温 (℃) ${getSortIcon('valMax')}</div>
+                </th>
+                <th class="p-3 cursor-pointer hover:bg-slate-100 transition-colors select-none text-right w-[18%] truncate" onclick="sortTable('valMin')">
+                    <div class="flex items-center justify-end">最低気温 (℃) ${getSortIcon('valMin')}</div>
+                </th>
+                <th class="p-3 text-slate-500 text-[10px] font-black text-center w-[11%] select-none">操作</th>
+            `;
+            lucide.createIcons();
+        }
+
+        async function refreshTableData() {
+            const dataKey = currentMode;
+            const searchVal = (document.getElementById('listSearchBox')?.value || "").trim();
+            renderTableHeader();
+
+            const activeIds = Object.keys(amedasData).filter(id => {
+                const meta = stationTable[id];
+                const valObj = amedasData[id][dataKey];
+                if (!meta || !valObj) return false;
+                if (searchVal && !meta.kjName.includes(searchVal)) return false;
+
+                const stationPref = getPrefByStationId(id);
+                if (selectedArea !== 'all') {
+                    const targetPrefs = REGION_PREFS[selectedArea] || [];
+                    if (!targetPrefs.includes(stationPref)) return false;
+                }
+                if (selectedPref !== 'all') {
+                    if (stationPref !== selectedPref) return false;
+                }
+                return true;
+            });
+
+            let rows = activeIds.map(id => {
+                const meta = stationTable[id];
+                const currentVal = amedasData[id][dataKey]?.[0] ?? null;
+                const pref = getPrefByStationId(id);
+                const maxVal = amedasData[id].maxtemp?.[0] ?? null;
+                const maxTime = amedasData[id].maxtemp?.[2] ?? null;
+                const minVal = amedasData[id].mintemp?.[0] ?? null;
+                const minTime = amedasData[id].mintemp?.[2] ?? null;
+
+                return { id: id, kjName: meta.kjName, pref: pref, val: currentVal, valMax: maxVal, valMaxTime: maxTime, valMin: minVal, valMinTime: minTime };
+            });
+
+            sortRows(rows);
+            renderTableDOM(rows);
+        }
+
+        function sortRows(rows) {
+            rows.sort((a, b) => {
+                let valA = a[sortColumn];
+                let valB = b[sortColumn];
+                if (valA === null || valA === undefined) return 1;
+                if (valB === null || valB === undefined) return -1;
+                return sortDirection === 'asc' ? valA - valB : valB - valA;
+            });
+        }
+
+        function renderTableDOM(rows) {
+            const tbody = document.getElementById('tableBody');
+            const labelMode = document.getElementById('listTitleMode');
+            if (!tbody) return;
+            if (labelMode) labelMode.innerText = `${elements[currentMode]?.name || currentMode} 実況リスト`;
+
+            tbody.innerHTML = rows.map(r => {
+                const isWind = currentMode === 'wind';
+                let currentStr = "ーー";
+                const unit = elements[currentMode]?.unit || "";
+
+                if (r.val !== null) {
+                    if (isWind) {
+                        const windDirIdx = amedasData[r.id].windDirection ? amedasData[r.id].windDirection[0] : null;
+                        currentStr = `${getWindDirectionText(windDirIdx)} ${r.val.toFixed(1)}m/s`;
+                    } else {
+                        currentStr = `${r.val.toFixed(1)}${unit}`;
+                    }
+                }
+
+                const maxStr = r.valMax !== null ? `<div class="flex items-baseline justify-end gap-1"><span class="bg-orange-50 text-orange-600 px-2 py-0.5 rounded-lg border border-orange-100 shadow-sm">${r.valMax.toFixed(1)}℃</span><span class="text-[9px] text-orange-400 font-bold w-7 text-right">(${r.valMaxTime || '--:--'})</span></div>` : `<span class="text-slate-300 font-normal">--</span>`;
+                const minStr = r.valMin !== null ? `<div class="flex items-baseline justify-end gap-1"><span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg border border-blue-100 shadow-sm">${r.valMin.toFixed(1)}℃</span><span class="text-[9px] text-blue-400 font-bold w-7 text-right">(${r.valMinTime || '--:--'})</span></div>` : `<span class="text-slate-300 font-normal">--</span>`;
+
+                const dotColor = getColorForValue(r.val, currentMode);
+                const dotHtml = `<div class="w-2 h-2 rounded-full border border-white inline-block shadow-sm flex-shrink-0" style="background:${dotColor}"></div>`;
+
+                return `
+                    <tr class="hover:bg-slate-50/80 transition-colors">
+                        <td class="p-3 w-[25%] truncate"><div class="flex items-center gap-2 w-full truncate">${dotHtml}<span class="text-slate-900 font-extrabold text-xs md:text-sm truncate" title="${r.kjName}">${r.kjName}</span></div></td>
+                        <td class="p-3 text-slate-500 text-[11px] md:text-xs truncate w-[18%]" title="${r.pref}">${r.pref}</td>
+                        <td class="p-3 text-right text-slate-800 font-black text-xs md:text-sm w-[18%] truncate"><div class="text-right truncate w-full">${currentStr}</div></td>
+                        <td class="p-3 text-right font-black text-xs md:text-sm w-[20%] truncate" id="max-${r.id}"><div class="text-right truncate w-full">${maxStr}</div></td>
+                        <td class="p-3 text-right font-black text-xs md:text-sm w-[18%] truncate" id="min-${r.id}"><div class="text-right truncate w-full">${minStr}</div></td>
+                        <td class="p-3 text-center w-[11%]"><button onclick="showStationDetail('${r.id}')" class="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all text-[10px] md:text-[11px] font-black whitespace-nowrap">詳細</button></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function sortTable(columnName) {
+            if (sortColumn === columnName) sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+            else { sortColumn = columnName; sortDirection = 'desc'; }
+            if (isTableModeActive) refreshTableData();
+        }
+
+        function toggleRadar() {
+            isRadarOn = !isRadarOn;
+            const btn = document.getElementById('radarToggle');
+            if (isRadarOn) { if (btn) btn.classList.add('radar-active-btn'); updateRadarLayer(); } 
+            else { if (btn) btn.classList.remove('radar-active-btn'); if (radarLayer) map.removeLayer(radarLayer); radarLayer = null; }
+            updateLegend();
+        }
+
+        function onAreaChange(area) {
+            selectedArea = area;
+            selectedPref = 'all';
+            const prefSelector = document.getElementById('prefSelector');
+            const listPrefSelector = document.getElementById('listPrefSelector');
+            
+            let optionsHtml = '';
+            if (area === 'all') {
+                optionsHtml = '<option value="all">すべて</option>';
+                if (prefSelector) { prefSelector.innerHTML = '<option value="all">都府県</option>'; prefSelector.disabled = true; }
+                if (listPrefSelector) { listPrefSelector.innerHTML = optionsHtml; listPrefSelector.disabled = true; }
+            } else {
+                const prefs = REGION_PREFS[area] || [];
+                optionsHtml = '<option value="all">すべて</option>';
+                prefs.forEach(p => { optionsHtml += `<option value="${p}">${p}</option>`; });
+                if (prefSelector) { prefSelector.innerHTML = optionsHtml; prefSelector.disabled = false; }
+                if (listPrefSelector) { listPrefSelector.innerHTML = optionsHtml; listPrefSelector.disabled = false; }
+            }
+
+            const areaSelector = document.getElementById('areaSelector');
+            const listAreaSelector = document.getElementById('listAreaSelector');
+            if (areaSelector && areaSelector.value !== area) areaSelector.value = area;
+            if (listAreaSelector && listAreaSelector.value !== area) listAreaSelector.value = area;
+            
+            applyAreaFilter();
+        }
+
+        function onPrefChange(pref) {
+            selectedPref = pref;
+            const prefSelector = document.getElementById('prefSelector');
+            const listPrefSelector = document.getElementById('listPrefSelector');
+            
+            if (prefSelector && prefSelector.value !== pref) prefSelector.value = pref;
+            if (listPrefSelector && listPrefSelector.value !== pref) listPrefSelector.value = pref;
+            
+            applyAreaFilter();
+        }
+
+        function applyAreaFilter() {
+            renderMarkers();
+            renderStationList();
+            if (isTableModeActive) refreshTableData();
+            
+            const activeLatLngs = [];
+            Object.keys(markers).forEach(id => { activeLatLngs.push(markers[id].getLatLng()); });
+            if (activeLatLngs.length > 0 && (selectedArea !== 'all' || selectedPref !== 'all')) {
+                const bounds = L.latLngBounds(activeLatLngs);
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10, animate: true });
+            }
+        }
+
+        function onListSearchInput(val) {
+            const sidebarSearch = document.getElementById('searchBox');
+            if (sidebarSearch) sidebarSearch.value = val;
+            refreshTableData();
+        }
+
+        function renderMarkers() {
+            Object.values(markers).forEach(m => map.removeLayer(m));
+            markers = {};
+            const dataKey = currentMode;
+            
+            const sortedIds = Object.keys(amedasData).filter(id => {
+                const meta = stationTable[id];
+                const valObj = amedasData[id][dataKey];
+                if (!meta || !valObj) return false;
+
+                const stationPref = getPrefByStationId(id);
+                if (selectedArea !== 'all') {
+                    const targetPrefs = REGION_PREFS[selectedArea] || [];
+                    if (!targetPrefs.includes(stationPref)) return false;
+                }
+                if (selectedPref !== 'all') { if (stationPref !== selectedPref) return false; }
+
+                const value = valObj[0];
+                if (value === null || value === undefined) return false;
+                if (['precipitation1h', 'precipitation10m', 'precipitation3h', 'precipitation24h', 'sun10m', 'sun1h', 'wind', 'snow', 'snow1h', 'snow6h', 'snow12h', 'snow24h'].includes(currentMode) && value <= 0) return false;
+                return true;
+            }).sort((a, b) => {
+                if (currentMode === 'mintemp') {
+                    return (amedasData[b][dataKey][0] || 0) - (amedasData[a][dataKey][0] || 0); 
+                }
+                return (amedasData[a][dataKey][0] || 0) - (amedasData[b][dataKey][0] || 0);
+            });
+
+            const zoom = map.getZoom();
+            const dotSize = Math.max(3, Math.min(16, 16 - (8 - zoom) * 2.5));
+            const svgSize = Math.max(6, Math.min(24, 24 - (8 - zoom) * 3.5));
+            const calmSize = Math.max(3, Math.min(12, 12 - (8 - zoom) * 2));
+
+            sortedIds.forEach(id => {
+                const meta = stationTable[id];
+                const value = amedasData[id][dataKey][0];
+                const color = getColorForValue(value, currentMode);
+                const pos = [meta.lat[0] + meta.lat[1]/60, meta.lon[0] + meta.lon[1]/60];
+                
+                let iconHtml, finalSize;
+                
+                if (currentMode === 'wind') {
+                    const windDirIdx = amedasData[id].windDirection ? amedasData[id].windDirection[0] : 0;
+                    const windSpeed = amedasData[id].wind ? amedasData[id].wind[0] : 0;
+                    if (windDirIdx === 0 || windSpeed === 0) {
+                        finalSize = calmSize;
+                        const borderW = Math.max(1, finalSize * 0.2);
+                        iconHtml = `<div style="width:${finalSize}px; height:${finalSize}px; background:${color}; border:${borderW}px solid white; border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>`;
+                    } else {
+                        finalSize = svgSize;
+                        const angle = (windDirIdx * 22.5) + 180;
+                        const strokeW = Math.max(1, finalSize * 0.1);
+                        iconHtml = `<svg width="${finalSize}" height="${finalSize}" viewBox="0 0 24 24" style="transform:rotate(${angle}deg); filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z" fill="${color}" stroke="white" stroke-width="${strokeW}"/></svg>`;
+                    }
+                } else {
+                    finalSize = dotSize;
+                    const borderW = Math.max(1, finalSize * 0.15);
+                    const shadow = finalSize > 6 ? 'box-shadow:0 1px 3px rgba(0,0,0,0.3);' : '';
+                    iconHtml = `<div style="width:${finalSize}px; height:${finalSize}px; background:${color}; border:${borderW}px solid white; border-radius:50%; ${shadow}"></div>`;
+                }
+
+                const marker = L.marker(pos, { pane: 'stationPane', icon: L.divIcon({ className: '', html: iconHtml, iconSize: [finalSize, finalSize], iconAnchor: [finalSize / 2, finalSize / 2] }) }).addTo(map);
+
+                let tooltipText = `${meta.kjName}: `;
+                if (currentMode === 'wind') {
+                    const windDirIdx = amedasData[id].windDirection ? amedasData[id].windDirection[0] : null;
+                    tooltipText += `${getWindDirectionText(windDirIdx)} ${value.toFixed(1)} m/s`;
+                } else tooltipText += `${value}${elements[currentMode]?.unit || ''}`;
+
+                marker.bindTooltip(tooltipText, { direction: 'top', offset: [0, -finalSize/2], className: 'leaflet-tooltip-station', opacity: 1 });
+                marker.on('click', () => showStationDetail(id));
+                markers[id] = marker;
+            });
+        }
+
+        function getColorForValue(v, mode) {
+            const rules = LEGENDS[mode] || LEGENDS.temp;
+            for (let rule of rules) { if (v >= rule.v) return rule.c; }
+            return rules[rules.length - 1].c;
+        }
+
+        async function showStationDetail(id) {
+            if (isTableModeActive) toggleTableMode(false);
+            currentStationId = id;
+            const meta = stationTable[id];
+            
+            renderDetailPanel(id, amedasData[id] || {}); 
+            map.flyTo([meta.lat[0] + meta.lat[1]/60, meta.lon[0] + meta.lon[1]/60], 10);
+
+            try {
+                await fetchStationTimeSeries(id);
+                if (currentStationId === id) renderDetailPanel(id, amedasData[id] || {});
+                renderStationList();
+                if (isTableModeActive) refreshTableData();
+            } catch (error) { console.error("Failed to load time series:", error); }
+        }
+
+        function renderDetailPanel(id, data) {
+            const meta = stationTable[id];
+            const panel = document.getElementById('detailPanel');
+            const legendEl = document.getElementById('mapLegend');
+            if (!panel) return;
+            
+            panel.classList.remove('hidden');
+            if (window.innerWidth < 768) { 
+                isSidebarOpen = false;
+                document.getElementById('sidebar').classList.remove('sidebar-open');
+                if (legendEl) legendEl.classList.add('hide-legend');
+            }
+
+            const primaryKeys = ['temp', 'humidity', 'precipitation1h', 'wind'];
+            let primaryHtml = '';
+            
+            primaryKeys.forEach(key => {
+                const item = elements[key];
+                const valObj = data[key];
+                let valDisplay = 'ーー';
+                
+                if (valObj && valObj[0] !== null && valObj[0] !== undefined) {
+                    const rawVal = valObj[0];
+                    if (key === 'wind') {
+                        const windDirIdx = data.windDirection ? data.windDirection[0] : null;
+                        valDisplay = `${getWindDirectionText(windDirIdx)} ${rawVal.toFixed(1)} m/s`;
+                    } else valDisplay = `${rawVal.toFixed(1)} ${item.unit}`;
+                } else valDisplay = key === 'wind' ? 'ーー' : `ーー ${item.unit}`;
+
+                let cardBg = 'bg-white/70 border-slate-100';
+                if (key === 'temp') cardBg = 'bg-orange-50/60 border-orange-200/50 text-orange-950';
+                else if (key === 'humidity') cardBg = 'bg-blue-50/60 border-blue-200/50 text-blue-950';
+                else if (key === 'precipitation1h') cardBg = 'bg-indigo-50/60 border-indigo-200/50 text-indigo-950';
+                else if (key === 'wind') cardBg = 'bg-emerald-50/60 border-emerald-200/50 text-emerald-950';
+                
+                primaryHtml += `
+                    <div class="info-card ${cardBg} border p-4.5 rounded-2xl flex flex-col items-center justify-center min-h-[84px] shadow-sm">
+                        <span class="info-card-label text-[10px] font-bold text-slate-400 mb-1.5 leading-none">${item.name}</span>
+                        <span class="info-card-value text-base font-black leading-none">${valDisplay}</span>
+                    </div>
+                `;
+            });
+
+            let complementaryHtml = '';
+            Object.keys(elements).forEach(key => {
+                if (primaryKeys.includes(key) || key === 'maxtemp' || key === 'mintemp') return;
+                const item = elements[key];
+                const valObj = data[key];
+                if (valObj && valObj[0] !== null && valObj[0] !== undefined) {
+                    complementaryHtml += `
+                        <div class="info-card bg-slate-50/50 border border-slate-150 p-3 rounded-xl flex flex-col items-center justify-center min-h-[64px]">
+                            <span class="info-card-label text-[8px] font-bold text-slate-400 mb-1 leading-none">${item.name}</span>
+                            <span class="info-card-value text-xs font-black text-slate-700 leading-none">${valObj[0].toFixed(1)} ${item.unit}</span>
+                        </div>
+                    `;
+                }
+            });
+
+            let todayStatsHtml = '';
+            const calcMax = data.maxtemp?.[0] ?? null;
+            const calcMaxTime = data.maxtemp?.[2] ?? null;
+            const calcMin = data.mintemp?.[0] ?? null;
+            const calcMinTime = data.mintemp?.[2] ?? null;
+
+            if (calcMax !== null || calcMin !== null) {
+                const unit = elements.temp.unit;
+                todayStatsHtml = `
+                    <div class="mt-4 p-3.5 bg-slate-50 border border-slate-200/60 rounded-2xl flex flex-col gap-2">
+                        <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center leading-none">本日の気温 極値</p>
+                        <div class="grid grid-cols-2 gap-2 mt-1">
+                            <div class="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col items-center justify-center shadow-sm">
+                                <span class="text-[9px] font-black text-orange-500 uppercase italic">MAX</span>
+                                <div class="flex items-baseline gap-1 mt-0.5">
+                                    <span class="text-sm font-black text-orange-600">${calcMax !== null ? calcMax.toFixed(1) : 'ーー'}${unit}</span>
+                                    <span class="text-[9px] font-bold text-orange-400">(${calcMaxTime || '--:--'})</span>
+                                </div>
+                            </div>
+                            <div class="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col items-center justify-center shadow-sm">
+                                <span class="text-[9px] font-black text-blue-500 uppercase italic">MIN</span>
+                                <div class="flex items-baseline gap-1 mt-0.5">
+                                    <span class="text-sm font-black text-blue-600">${calcMin !== null ? calcMin.toFixed(1) : 'ーー'}${unit}</span>
+                                    <span class="text-[9px] font-bold text-blue-400">(${calcMinTime || '--:--'})</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const prefText = getPrefByStationId(id);
+            panel.innerHTML = `
+                <div class="p-8 md:p-6 space-y-6 text-left pt-12 md:pt-6">
+                    <div class="flex justify-between items-start">
+                        <div class="space-y-1 text-left">
+                            <p class="text-[10px] font-black text-blue-600 uppercase italic">観測点情報 (${prefText})</p>
+                            <h3 class="text-2xl font-black text-slate-900 tracking-tighter leading-none">${meta.kjName}</h3>
+                            <p class="text-[11px] font-bold text-slate-400">標高: ${meta.alt}m | ID: ${id}</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="openGraphModal('${id}')" class="flex items-center gap-1 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl active:scale-95 transition-all font-black text-[11px] border border-blue-100 hover:bg-blue-100 shadow-sm"><i data-lucide="bar-chart-2" class="w-4 h-4"></i>グラフ</button>
+                            <button onclick="hideStationDetail()" class="w-10 h-10 flex items-center justify-center bg-slate-100 rounded-full active:scale-90 shadow-sm border border-slate-200 hover:bg-slate-200 transition-all"><i data-lucide="x" class="w-5 h-5 text-slate-500"></i></button>
+                        </div>
+                    </div>
+                    <div class="bg-white/95 p-4 rounded-3xl border border-slate-150/80 shadow-md">
+                        <p class="text-[9px] font-black text-slate-400 uppercase italic text-center tracking-widest mb-3.5">主要気象観測</p>
+                        <div class="grid grid-cols-2 gap-2.5">${primaryHtml}</div>
+                        ${todayStatsHtml}
+                        ${complementaryHtml ? `<details class="group mt-4 border-t border-slate-100 pt-3"><summary class="flex justify-between items-center cursor-pointer list-none [&::-webkit-details-marker]:hidden py-2 text-[10px] font-black text-slate-400 hover:text-blue-600 transition-all select-none uppercase tracking-widest"><span>その他の補足観測</span><i data-lucide="chevron-down" class="w-4 h-4 transition-transform group-open:rotate-180 text-slate-400"></i></summary><div class="grid grid-cols-2 gap-2 mt-2">${complementaryHtml}</div></details>` : ''}
+                        ${(!primaryHtml && !complementaryHtml && !todayStatsHtml) ? '<p class="text-center text-xs text-slate-400 py-4 font-bold">有効な気象データがありません</p>' : ''}
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function hideStationDetail() {
+            document.getElementById('detailPanel').classList.add('hidden');
+            const legendEl = document.getElementById('mapLegend');
+            if (legendEl) legendEl.classList.remove('hide-legend');
+            currentStationId = null;
+        }
+
+        function renderStationList() {
+            const list = document.getElementById('stationList');
+            const dataKey = currentMode;
+            if (!list || !amedasData) return;
+            
+            const sortedIds = Object.keys(amedasData)
+                .filter(id => {
+                    const hasVal = amedasData[id][dataKey] !== undefined && amedasData[id][dataKey] !== null && amedasData[id][dataKey][0] !== null;
+                    if (!hasVal) return false;
+                    const pref = getPrefByStationId(id);
+                    if (selectedArea !== 'all') {
+                        const targetPrefs = REGION_PREFS[selectedArea] || [];
+                        if (!targetPrefs.includes(pref)) return false;
+                    }
+                    if (selectedPref !== 'all') { if (pref !== selectedPref) return false; }
+                    return true;
+                })
+                .sort((a,b) => {
+                    const valA = amedasData[a][dataKey]?.[0];
+                    const valB = amedasData[b][dataKey]?.[0];
+                    if (valA === undefined || valA === null) return 1;
+                    if (valB === undefined || valB === null) return -1;
+                    if (currentMode === 'mintemp') {
+                        return valA - valB;
+                    }
+                    return valB - valA;
+                });
+
+            // 100件まで表示
+            const displayIds = sortedIds.slice(0, 100);
+
+            let rank = 1;
+            list.innerHTML = displayIds.map(id => {
+                const dP = amedasData[id][dataKey];
+                const rawVal = dP[0];
+                let valStr = "";
+
+                if (currentMode === 'wind') {
+                    const windDirIdx = amedasData[id].windDirection ? amedasData[id].windDirection[0] : null;
+                    valStr = `${getWindDirectionText(windDirIdx)} ${rawVal.toFixed(1)}m/s`;
+                } else {
+                    let timeStr = "";
+                    if ((currentMode === 'maxtemp' || currentMode === 'mintemp') && dP[2]) {
+                        timeStr = `<span class="text-[9px] text-slate-400 font-bold ml-1">(${dP[2]})</span>`;
+                    }
+                    valStr = `${rawVal.toFixed(1)}${elements[currentMode]?.unit || ''}${timeStr}`;
+                }
+
+                const color = getColorForValue(rawVal, currentMode);
+                const dot = `<div style="width:10px; height:10px; background:${color}; border:1.5px solid white; border-radius:50%;"></div>`;
+                
+                const rankChar = rank; 
+                let rankStyle = "text-slate-400 text-sm font-black w-6 text-center";
+                
+                if (currentMode === 'mintemp') {
+                    if (rank === 1) rankStyle = "text-blue-500 text-base font-black w-6 text-center";
+                    if (rank === 2) rankStyle = "text-cyan-500 text-sm font-black w-6 text-center";
+                    if (rank === 3) rankStyle = "text-sky-600 text-sm font-black w-6 text-center";
+                } else {
+                    if (rank === 1) rankStyle = "text-red-500 text-base font-black w-6 text-center";
+                    if (rank === 2) rankStyle = "text-orange-500 text-sm font-black w-6 text-center";
+                    if (rank === 3) rankStyle = "text-yellow-600 text-sm font-black w-6 text-center";
+                }
+                
+                const html = `
+                    <div onclick="showStationDetail('${id}')" class="p-3 bg-white border border-slate-100 rounded-2xl flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-all shadow-sm">
+                        <div class="flex items-center gap-1.5"><span class="${rankStyle}">${rankChar}</span><div class="flex flex-col ml-1"><h4 class="text-xs font-bold text-slate-700 leading-tight">${stationTable[id].kjName}</h4><span class="text-[9px] text-slate-400 font-bold">${getPrefByStationId(id)}</span></div></div>
+                        <span class="text-sm font-black flex items-center gap-2">${dot} <span class="flex items-baseline">${valStr}</span></span>
+                    </div>
+                `;
+                rank++;
+                return html;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        function searchStation(q) {
+            const list = document.getElementById('stationList');
+            if (!list || !q) { renderStationList(); return; }
+            const results = Object.keys(stationTable).filter(id => {
+                const kjNameMatches = stationTable[id].kjName.includes(q);
+                if (!kjNameMatches) return false;
+                const pref = getPrefByStationId(id);
+                if (selectedArea !== 'all') {
+                    const targetPrefs = REGION_PREFS[selectedArea] || [];
+                    if (!targetPrefs.includes(pref)) return false;
+                }
+                if (selectedPref !== 'all') { if (pref !== selectedPref) return false; }
+                return true;
+            }).slice(0, 50);
+
+            list.innerHTML = results.map(id => `<div onclick="showStationDetail('${id}')" class="p-4 bg-white border border-slate-100 rounded-2xl flex items-center cursor-pointer shadow-sm hover:bg-slate-50"><h4 class="text-sm font-bold text-slate-700">${stationTable[id].kjName}</h4></div>`).join('');
+        }
+
+        function resetView() { 
+            document.getElementById('areaSelector').value = 'all';
+            onAreaChange('all');
+            map.setView(MAP_CENTER, MAP_ZOOM); 
+            hideStationDetail(); 
+            toggleTableMode(false);
+            currentStepIndex = timeSteps.length - 1;
+            loadMapDataForStep(currentStepIndex);
+        }
+        
+        function zoomChart(direction) { if (!currentChart) return; const factor = direction === 'in' ? 1.2 : 0.8; currentChart.zoom(factor); }
+        function panChart(direction) { if (!currentChart) return; const amount = direction === 'left' ? 100 : -100; currentChart.pan({ x: amount }); }
+        function resetChartZoom() { if (!currentChart) return; currentChart.resetZoom(); }
+        function changeGraphInterval(val) { currentGraphInterval = parseInt(val, 10); if (currentStationId) renderChart(currentStationId, currentMode); }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
