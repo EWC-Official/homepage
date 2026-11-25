@@ -9,30 +9,23 @@
 <style>
 :root{--ink:#14213d;--sub:#5a6577;--line:#d5dce8;--bg:#f2f5fa;--card:#eef1f7;--accent:#c8102e}
 *{box-sizing:border-box}
-body{margin:0;font-family:'Noto Sans JP',sans-serif;color:#1c2430;background:#fff;line-height:1.7}
+body{margin:0;font-family:'Noto Sans JP',sans-serif;color:#1c2430;background:#fff;line-height:1.8}
 header{border-bottom:1px solid var(--line);padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
 .logo{font-weight:900;font-size:22px;color:var(--ink);letter-spacing:.05em}
 .btn-line{background:#06c755;color:#fff;text-decoration:none;padding:8px 16px;border-radius:999px;font-weight:700;font-size:14px}
-main{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
-.hero{text-align:center;padding:28px 8px 8px}
-.hero h1{font-size:30px;margin:0 0 6px;color:var(--ink)}
-.hero p{color:var(--sub);margin:4px 0}
-h2{font-size:20px;color:var(--ink);border-bottom:2px solid var(--accent);padding-bottom:6px;margin:36px 0 16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
-.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 14px;text-decoration:none;color:var(--ink);font-weight:700;text-align:center}
-.card:hover{background:#e2e9f4}
-.card small{display:block;font-weight:400;color:var(--sub);margin-top:4px;font-size:12px}
-.filters{margin:0 0 14px;display:flex;gap:8px;flex-wrap:wrap}
-.filters button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;cursor:pointer;font-size:14px}
-.filters button.on{background:var(--ink);color:#fff}
-.status{background:#fdf6e3;border:1px solid #e8d9a0;border-radius:10px;padding:14px 18px}
-footer{border-top:1px solid var(--line);padding:20px 16px;text-align:center;color:var(--sub);font-size:13px}
-footer nav{margin-bottom:10px}
-footer a{color:var(--ink);text-decoration:none;margin:0 6px}
+main{max-width:880px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:26px;color:var(--ink);margin:8px 0 16px}
+h2{font-size:20px;color:var(--ink);border-bottom:2px solid var(--accent);padding-bottom:6px;margin:36px 0 14px}
+h3{font-size:16px;color:var(--ink);margin:22px 0 8px}
+p{margin:0 0 12px}
+ol,ul{margin:0 0 12px;padding-left:24px}
+li{margin-bottom:4px}
 table{width:100%;border-collapse:collapse;margin:12px 0}
 th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
 th{background:var(--card)}
 .note{color:var(--sub);font-size:14px}
+footer{border-top:1px solid var(--line);padding:20px 16px;text-align:center;color:var(--sub);font-size:13px}
+.check{list-style:none;padding-left:4px}
 </style>
 </head>
 <body>
@@ -43,8 +36,132 @@ th{background:var(--card)}
 <main>
   <p><a href="index.html">← トップへ戻る</a></p>
 
-  <h1>防災ガイド</h1>
-  <p class="note">このページは移行作業中です。現在の内容は <a href="https://sites.google.com/view/ewc-official-1/">現行の公式ホームページ</a> をご覧ください。</p>
+  <h1>EWC防災ガイド</h1>
+  <p class="note">大切な自分と家族を守るための準備と避難</p>
+  <h2>災害別対策</h2>
+  <h3>地震に対する備え</h3>
+  <p><strong>屋内での安全確保</strong></p>
+  <ul>
+    <li>家具の固定：倒れやすい家具は壁に固定し、落下物のリスクを減らす。</li>
+    <li>避難経路の確保：寝室やリビングに通路を確保し、家具が倒れても避難しやすい状態に。</li>
+    <li>寝室の安全対策：寝具の近くに大きな家具を置かないようにする。</li>
+  </ul>
+  <p><strong>地震発生時の行動</strong></p>
+  <ul>
+    <li>揺れを感じたら：机やテーブルの下に隠れる。頭を守り、揺れが収まるまで待機。</li>
+    <li>揺れが収まったら：火元の確認、出口の確保、ブレーカーを落とす。</li>
+    <li>避難する際：津波や火災の恐れがある場合は、高台や避難所へ迅速に避難。</li>
+  </ul>
+  <h3>🌊 津波に対する備え</h3>
+  <ul>
+    <li>海辺や川沿いにいる場合：揺れを感じたらすぐに高台へ避難。</li>
+    <li>津波警報が発令された場合：海岸から離れ、高台や津波避難タワーへ避難。</li>
+    <li>避難のタイミング：津波の到達は数分以内もあるため、迅速な行動が必要。</li>
+  </ul>
+  <h3>台風・大雨に対する備え</h3>
+  <p><strong>雨や風への備え</strong></p>
+  <ul>
+    <li>雨戸や窓の補強：雨戸を閉め、窓ガラスが割れるのを防ぐ。</li>
+    <li>屋外の物を片付ける：強風で飛ばされるものを室内に収納。</li>
+    <li>避難準備：避難所への経路を確認し、必要に応じて早めに避難。</li>
+  </ul>
+  <p><strong>大雨時の注意</strong></p>
+  <ul>
+    <li>河川の増水：河川の水位が上がっている場合、川に近づかない。</li>
+    <li>土砂災害：土砂災害警戒区域では、早めに避難する。</li>
+  </ul>
+  <h3>火山噴火に対する備え</h3>
+  <ul>
+    <li>火山灰対策：マスクやゴーグルを着用し、火山灰から目や呼吸器を守る。</li>
+    <li>車の運転：視界が悪化するため、運転を控えるか、慎重に運転。</li>
+    <li>火山活動の情報確認：火山噴火の兆候があれば、早めに避難する。</li>
+  </ul>
+  <h3>竜巻の対策</h3>
+  <ul>
+    <li>頑丈な建物内に避難：窓から離れ、建物の中心部へ移動する。</li>
+    <li>車内にいる場合：車を離れ、近くの頑丈な建物や溝に避難する。</li>
+    <li>屋外にいる場合：建物の中や低い場所に避難する。</li>
+  </ul>
+  <p class="note">※災害時は状況に応じ、自治体や警察・消防、気象庁の指示に必ず従ってください。</p>
+  <h2>非常持ち出し袋</h2>
+  <h3>非常用持ち出し袋の準備</h3>
+  <p><strong>水・食料</strong></p>
+  <ul>
+    <li>水：1人1日3リットル×3日分を目安に（家族分を計算して準備）</li>
+    <li>食料：アルファ米、缶詰、レトルト食品など、調理不要のものを3日分</li>
+    <li>非常食：カロリーメイト、ビスケットなどのエネルギー補給食</li>
+  </ul>
+  <p><strong>生活用品</strong></p>
+  <ul>
+    <li>懐中電灯：予備の電池と一緒に準備</li>
+    <li>携帯ラジオ：災害時の情報収集に必須</li>
+    <li>マッチ・ライター：火を使う場面に備えて</li>
+    <li>レインコート：雨天時の避難に必須</li>
+    <li>防寒具：毛布やカイロ、季節に応じた防寒対策</li>
+  </ul>
+  <p><strong>衛生用品</strong></p>
+  <ul>
+    <li>ウェットティッシュ：体を拭くための必需品</li>
+    <li>トイレットペーパー：避難所でも使用</li>
+    <li>マスク：感染症予防や防塵用</li>
+  </ul>
+  <p><strong>情報・連絡手段</strong></p>
+  <ul>
+    <li>身分証明書のコピー：保険証や運転免許証のコピー</li>
+    <li>現金：小銭や千円札を準備（停電時にATMが使えない場合に備えて）</li>
+    <li>充電器：携帯電話の充電器、モバイルバッテリー</li>
+  </ul>
+  <h3>持ち出し袋のチェックリスト</h3>
+  <ul class="check">
+    <li>☐ 水</li>
+    <li>☐ 食料（アルファ米・缶詰）</li>
+    <li>☐ 懐中電灯</li>
+    <li>☐ 携帯ラジオ</li>
+    <li>☐ マッチ・ライター</li>
+    <li>☐ レインコート</li>
+    <li>☐ 防寒具（毛布・カイロ）</li>
+    <li>☐ ウェットティッシュ</li>
+    <li>☐ トイレットペーパー</li>
+    <li>☐ マスク</li>
+    <li>☐ 身分証明書のコピー</li>
+    <li>☐ 現金（小銭・千円札）</li>
+    <li>☐ 充電器・モバイルバッテリー</li>
+  </ul>
+  <h3>備蓄のポイント</h3>
+  <p><strong>水の備蓄</strong>：1人1日3リットル×3日分を目安に。家族の人数分を準備しましょう。</p>
+  <p><strong>食料の備蓄</strong>：消費期限を確認し、半年に一度は入れ替えを。ローリングストックで常に新しいものを備蓄するのが理想です。</p>
+  <p><a href="https://drive.google.com/file/d/1NfCDRhkGq7lITiCzdlsd1Rmxr9TGguQj/view?usp=drive_link">非常用持ち出し袋リスト（PDFを開く）</a></p>
+  <h2>避難・応急手当</h2>
+  <h3>地震発生時の避難方法</h3>
+  <ul>
+    <li>屋内にいる場合：机やテーブルの下に隠れ、揺れが収まるまで待機。揺れが収まったら、火元を確認し、出口を確保して避難。</li>
+    <li>屋外にいる場合：落下物に注意し、建物から離れて広い場所に避難。ブロック塀や電柱からも離れる。</li>
+    <li>車内にいる場合：急ブレーキをかけず、ゆっくりと停止し、車の鍵を抜いて避難。</li>
+  </ul>
+  <h3>応急手当の基本</h3>
+  <ul>
+    <li>出血の処置：傷口を押さえて止血。タオルや布で圧迫する。</li>
+    <li>骨折の処置：無理に動かさず、添え木を使って固定する。</li>
+    <li>やけどの処置：冷水で冷やし、無理に服を脱がさない。</li>
+  </ul>
+  <h3>🔥 火災が起きたら</h3>
+  <ul>
+    <li>火元を確認：火が小さいうちは消火器で消火。無理な場合はすぐに避難。</li>
+    <li>避難の優先順位：煙を吸わないように低い姿勢で避難。火元の方向には行かない。</li>
+    <li>119番通報：火災が発生したらすぐに119番に通報。</li>
+  </ul>
+  <h3>🛡️ 災害時の家族・ペット</h3>
+  <ul>
+    <li>家族の安全確認：災害時には、家族の安否確認を最優先に。災害用伝言ダイヤル「171」を利用。</li>
+    <li>ペットの避難：ペットも家族の一員。ペットの避難場所を確認し、ペット用の非常食や水も準備しておく。</li>
+  </ul>
+  <h2>連絡・マップ</h2>
+  <h3>📢 災害用伝言ダイヤル「171」</h3>
+  <p>【録音する】171 → 1 → 自分の電話番号（※30秒以内で伝言を吹き込む）<br>
+  【再生する】171 → 2 → 相手の電話番号（※最新の録音から流れます）</p>
+  <h3>🗺️ 公式リンク集</h3>
+  <p><a href="https://disaportal.gsi.go.jp/">重ねるハザードマップ</a>：洪水・土砂災害・津波などのリスクを1枚の地図で重ねて確認。</p>
+  <p><a href="https://disaportal.gsi.go.jp/hazardmap/index.html">わがまちハザードマップ</a>：市区町村ごとの詳細なマップを検索。</p>
 
 </main>
 <footer>
